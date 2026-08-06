@@ -49,6 +49,7 @@ public partial class PopupWindow : Window
     private bool _streamingVisible;
     private bool _isPinned;
     private bool _isClosed;
+    private int _boundsRefreshQueued;
 
     public PopupWindow(string sourceText, string? appName, AppSettings settings)
     {
@@ -197,12 +198,12 @@ public partial class PopupWindow : Window
 
     private void OnSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        RefreshPhysicalBounds();
+        SchedulePhysicalBoundsRefresh();
     }
 
     private void OnLocationChanged(object? sender, EventArgs e)
     {
-        RefreshPhysicalBounds();
+        SchedulePhysicalBoundsRefresh();
     }
 
     private void OnClosed(object? sender, EventArgs e)
@@ -223,12 +224,29 @@ public partial class PopupWindow : Window
         LoadingText.Text = $"翻译中…（已等待 {_stopwatch.Elapsed.TotalSeconds:F1} 秒）";
     }
 
-    private void MouseHook_OnClickedOutside(object? sender, EventArgs e)
+    private void MouseHook_OnClickedOutside(object? sender, OutsideClickEventArgs e)
     {
-        if (!_isPinned && !_isClosed)
+        if (_isPinned || _isClosed)
+        {
+            _mouseHook.ResetOutsideClickCheck();
+            return;
+        }
+
+        // 低级钩子使用的是缓存边界；真正关闭前必须读取原生窗口的最新矩形再次确认。
+        bool confirmed = TryConfirmOutsideCurrentNativeBounds(e.X, e.Y, out bool outside);
+        if (confirmed && outside)
         {
             Close();
+            return;
         }
+
+        if (confirmed && !outside)
+        {
+            Logger.Info("浮窗", "外部点击关闭复核发现点击仍在浮窗内，已保留窗口。");
+        }
+
+        _mouseHook.ResetOutsideClickCheck();
+        SchedulePhysicalBoundsRefresh();
     }
 
     private void Toolbar_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -264,6 +282,7 @@ public partial class PopupWindow : Window
         {
             if (_result is null)
             {
+                Logger.Warning("浮窗", "用户点击复制，但当前浮窗还没有可复制的译文。");
                 return;
             }
 
@@ -292,6 +311,7 @@ public partial class PopupWindow : Window
     {
         if (_result?.RecordId is not long recordId)
         {
+            Logger.Warning("浮窗", "用户点击收藏，但当前译文没有可保存的历史记录。");
             return;
         }
 
@@ -302,20 +322,45 @@ public partial class PopupWindow : Window
 
     private void NoticeActionButton_OnClick(object sender, RoutedEventArgs e)
     {
-        ActionRequested?.Invoke(this, new PopupActionEventArgs(_noticeAction));
+        Logger.Info("浮窗", $"用户点击了底部提示条按钮：{NoticeActionButton.Content}。");
+        EventHandler<PopupActionEventArgs>? handler = ActionRequested;
+        if (handler is null)
+        {
+            Logger.Error("浮窗", "底部提示条操作没有订阅者，无法执行用户请求。");
+            return;
+        }
+
+        handler.Invoke(this, new PopupActionEventArgs(_noticeAction));
     }
 
     private void DisableThinkingButton_OnClick(object sender, RoutedEventArgs e)
     {
+        Logger.Info("浮窗", "用户点击了底部提示条按钮：关闭思考模式。");
         DisableThinkingButton.IsEnabled = false;
         DisableThinkingButton.Content = "正在重译…";
-        DisableThinkingRequested?.Invoke(this, EventArgs.Empty);
+        EventHandler? handler = DisableThinkingRequested;
+        if (handler is null)
+        {
+            Logger.Error("浮窗", "关闭思考模式操作没有订阅者，无法执行用户请求。");
+            RestoreDisableThinkingButton();
+            return;
+        }
+
+        handler.Invoke(this, EventArgs.Empty);
     }
 
     private void NoticeDismissButton_OnClick(object sender, RoutedEventArgs e)
     {
+        Logger.Info("浮窗", "用户点击了底部提示条按钮：不再提示。");
+        EventHandler? handler = SuppressReasoningWarningRequested;
+        if (handler is null)
+        {
+            Logger.Error("浮窗", "不再提示操作没有订阅者，无法执行用户请求。");
+            return;
+        }
+
         NoticeBorder.Visibility = Visibility.Collapsed;
-        SuppressReasoningWarningRequested?.Invoke(this, EventArgs.Empty);
+        handler.Invoke(this, EventArgs.Empty);
     }
 
     private void SetLoadingState(bool isLoading)
@@ -511,7 +556,7 @@ public partial class PopupWindow : Window
         try
         {
             DpiHelper.PositionPopup(this);
-            RefreshPhysicalBounds();
+            SchedulePhysicalBoundsRefresh();
         }
         catch (Exception exception)
         {
@@ -527,10 +572,74 @@ public partial class PopupWindow : Window
         }
 
         nint handle = new WindowInteropHelper(this).Handle;
-        if (handle != nint.Zero && NativeMethods.GetWindowRect(handle, out NativeMethods.Rect rectangle))
+        if (handle == nint.Zero)
         {
-            _mouseHook.UpdateBounds(rectangle.Left, rectangle.Top, rectangle.Right, rectangle.Bottom);
+            Logger.Warning("浮窗", "刷新浮窗边界时无法取得原生窗口句柄。");
+            return;
         }
+
+        if (!NativeMethods.GetWindowRect(handle, out NativeMethods.Rect rectangle))
+        {
+            Logger.Warning(
+                "浮窗",
+                $"刷新浮窗边界失败。Windows 错误码：{Marshal.GetLastWin32Error()}。");
+            return;
+        }
+
+        _mouseHook.UpdateBounds(rectangle.Left, rectangle.Top, rectangle.Right, rectangle.Bottom);
+    }
+
+    private void SchedulePhysicalBoundsRefresh()
+    {
+        if (_isClosed || Interlocked.Exchange(ref _boundsRefreshQueued, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            Dispatcher.BeginInvoke(
+                new Action(() =>
+                {
+                    Volatile.Write(ref _boundsRefreshQueued, 0);
+                    if (!_isClosed)
+                    {
+                        RefreshPhysicalBounds();
+                    }
+                }),
+                DispatcherPriority.Loaded);
+        }
+        catch (Exception exception)
+        {
+            Volatile.Write(ref _boundsRefreshQueued, 0);
+            Logger.Error("浮窗", "安排浮窗边界刷新失败。", exception);
+        }
+    }
+
+    private bool TryConfirmOutsideCurrentNativeBounds(int x, int y, out bool outside)
+    {
+        outside = false;
+        nint handle = new WindowInteropHelper(this).Handle;
+        if (handle == nint.Zero)
+        {
+            Logger.Warning("浮窗", "关闭前无法取得浮窗句柄，已取消本次外部点击关闭。");
+            return false;
+        }
+
+        if (!NativeMethods.GetWindowRect(handle, out NativeMethods.Rect rectangle))
+        {
+            Logger.Warning(
+                "浮窗",
+                $"关闭前无法复核浮窗边界，已取消本次关闭。Windows 错误码：{Marshal.GetLastWin32Error()}。");
+            return false;
+        }
+
+        _mouseHook.UpdateBounds(rectangle.Left, rectangle.Top, rectangle.Right, rectangle.Bottom);
+        outside = x < rectangle.Left
+            || x >= rectangle.Right
+            || y < rectangle.Top
+            || y >= rectangle.Bottom;
+        return true;
     }
 
     private void LockCurrentHeight()

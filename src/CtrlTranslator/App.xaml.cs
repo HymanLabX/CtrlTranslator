@@ -3,7 +3,6 @@ using System.Threading;
 using System.IO;
 using System.Windows;
 using System.Windows.Threading;
-using System.Text.Json;
 using CtrlTranslator.Core;
 using CtrlTranslator.Data;
 using CtrlTranslator.Diagnostics;
@@ -291,28 +290,33 @@ public partial class App : System.Windows.Application
             TextCapture? textCapture = _textCapture;
             if (appState is null || textCapture is null)
             {
+                Logger.Error("取词", "用户触发划词，但取词服务尚未初始化。");
                 return;
             }
 
             // SPEC §2.2 的四项前置检查必须保持此顺序。
             if (!appState.Enabled)
             {
+                Logger.Info("取词", "用户触发划词，但当前处于暂停状态，已忽略。");
                 return;
             }
 
             ForegroundApp? foregroundApp = ForegroundApp.GetCurrent();
             if (appState.IsBlacklisted(foregroundApp?.ProcessName))
             {
+                Logger.Info("取词", $"用户触发划词，但前台程序 {foregroundApp?.ProcessName ?? "未知"} 在黑名单中，已忽略。");
                 return;
             }
 
             if (!appState.TryEnterDebounce(Stopwatch.GetTimestamp()))
             {
+                Logger.Info("取词", "用户触发划词，但命中了防抖间隔，已忽略。");
                 return;
             }
 
             if (foregroundApp?.ProcessId == Environment.ProcessId)
             {
+                Logger.Info("取词", "用户在 CtrlTranslator 自身窗口内触发划词，已忽略。");
                 return;
             }
 
@@ -383,6 +387,12 @@ public partial class App : System.Windows.Application
         TranslationService? service = _translationService;
         if (service is null)
         {
+            Logger.Error("翻译", "用户已触发翻译，但翻译服务尚未初始化。");
+            System.Windows.MessageBox.Show(
+                "翻译服务还没有准备好，请退出程序后重新打开再试。",
+                "CtrlTranslator",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
             return;
         }
 
@@ -521,6 +531,15 @@ public partial class App : System.Windows.Application
                 await _translationService.SetStarredAsync(e.RecordId, e.Starred, CancellationToken.None);
                 Logger.Info("收藏", e.Starred ? "翻译已收藏。" : "翻译已取消收藏。");
             }
+            else
+            {
+                Logger.Error("收藏", "用户点击收藏，但翻译服务尚未初始化。");
+                System.Windows.MessageBox.Show(
+                    "收藏服务还没有准备好，请退出程序后重新打开再试。",
+                    "CtrlTranslator",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
         }
         catch (Exception exception)
         {
@@ -534,13 +553,25 @@ public partial class App : System.Windows.Application
         {
             if (_settings is null || _settingsStore is null)
             {
+                Logger.Error("设置", "用户点击不再提示，但设置服务尚未初始化。");
+                System.Windows.MessageBox.Show(
+                    "设置服务还没有准备好，请退出程序后重新打开再试。",
+                    "CtrlTranslator",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
                 return;
             }
 
             _settings.SuppressReasoningWarning = true;
             if (!_settingsStore.TrySave(_settings, out string? errorMessage))
             {
+                _settings.SuppressReasoningWarning = false;
                 Logger.Warning("设置", errorMessage ?? "保存推理模型提示设置失败。");
+                System.Windows.MessageBox.Show(
+                    errorMessage ?? "设置保存失败，请稍后重试。",
+                    "CtrlTranslator",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
             }
         }
         catch (Exception exception)
@@ -555,17 +586,28 @@ public partial class App : System.Windows.Application
         {
             if (sender is not PopupWindow popup || _settings is null || _settingsStore is null)
             {
+                Logger.Error("设置", "用户点击关闭思考模式，但浮窗或设置服务尚未初始化。");
                 if (sender is PopupWindow unavailablePopup)
                 {
                     unavailablePopup.RestoreDisableThinkingButton();
                 }
 
+                System.Windows.MessageBox.Show(
+                    "设置服务还没有准备好，请退出程序后重新打开再试。",
+                    "CtrlTranslator",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+
                 return;
             }
 
-            _settings.ExtraRequestBody = AddThinkingDisabled(_settings.ExtraRequestBody);
+            string previousExtraRequestBody = _settings.ExtraRequestBody;
+            _settings.ExtraRequestBody = ExtraRequestBodyHelper.SetThinkingDisabled(
+                previousExtraRequestBody,
+                disabled: true);
             if (!_settingsStore.TrySave(_settings, out string? errorMessage))
             {
+                _settings.ExtraRequestBody = previousExtraRequestBody;
                 System.Windows.MessageBox.Show(
                     errorMessage ?? "关闭思考模式的设置没有保存成功，请稍后再试。",
                     "CtrlTranslator",
@@ -592,36 +634,6 @@ public partial class App : System.Windows.Application
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
-    }
-
-    private static string AddThinkingDisabled(string? extraRequestBody)
-    {
-        var merged = new Dictionary<string, object?>();
-        if (!string.IsNullOrWhiteSpace(extraRequestBody))
-        {
-            try
-            {
-                using JsonDocument document = JsonDocument.Parse(extraRequestBody);
-                if (document.RootElement.ValueKind == JsonValueKind.Object)
-                {
-                    foreach (JsonProperty property in document.RootElement.EnumerateObject())
-                    {
-                        merged[property.Name] = property.Value.Clone();
-                    }
-                }
-                else
-                {
-                    Logger.Warning("设置", "原额外请求参数不是 JSON 对象，将用关闭思考模式的默认值替换。");
-                }
-            }
-            catch (JsonException exception)
-            {
-                Logger.Warning("设置", $"原额外请求参数不是合法 JSON，将用关闭思考模式的默认值替换：{exception.Message}");
-            }
-        }
-
-        merged["thinking"] = new Dictionary<string, string> { ["type"] = "disabled" };
-        return JsonSerializer.Serialize(merged);
     }
 
     private void ReportUnhandledException()

@@ -5,6 +5,13 @@ using CtrlTranslator.Diagnostics;
 
 namespace CtrlTranslator.Interop;
 
+internal sealed class OutsideClickEventArgs(int x, int y) : EventArgs
+{
+    public int X { get; } = x;
+
+    public int Y { get; } = y;
+}
+
 /// <summary>
 /// 浮窗显示期间监听全局鼠标按下；回调只比较数字并异步投递关闭事件。
 /// </summary>
@@ -19,6 +26,8 @@ internal sealed class LowLevelMouseHook : IDisposable
     private int _bottom;
     private int _pinned;
     private int _closeQueued;
+    private int _outsideClickX;
+    private int _outsideClickY;
     private bool _disposed;
 
     public LowLevelMouseHook(Dispatcher dispatcher)
@@ -27,7 +36,7 @@ internal sealed class LowLevelMouseHook : IDisposable
         _procedure = HookCallback;
     }
 
-    public event EventHandler? ClickedOutside;
+    public event EventHandler<OutsideClickEventArgs>? ClickedOutside;
 
     public void Install()
     {
@@ -60,10 +69,12 @@ internal sealed class LowLevelMouseHook : IDisposable
     public void SetPinned(bool pinned)
     {
         Volatile.Write(ref _pinned, pinned ? 1 : 0);
-        if (pinned)
-        {
-            Volatile.Write(ref _closeQueued, 0);
-        }
+        Volatile.Write(ref _closeQueued, 0);
+    }
+
+    public void ResetOutsideClickCheck()
+    {
+        Volatile.Write(ref _closeQueued, 0);
     }
 
     public void Dispose()
@@ -103,6 +114,8 @@ internal sealed class LowLevelMouseHook : IDisposable
                     || y >= Volatile.Read(ref _bottom);
                 if (outside && Interlocked.Exchange(ref _closeQueued, 1) == 0)
                 {
+                    Volatile.Write(ref _outsideClickX, x);
+                    Volatile.Write(ref _outsideClickY, y);
                     _dispatcher.BeginInvoke(new Action(RaiseClickedOutside), DispatcherPriority.Input);
                 }
             }
@@ -118,7 +131,11 @@ internal sealed class LowLevelMouseHook : IDisposable
 
     private void RaiseClickedOutside()
     {
-        ClickedOutside?.Invoke(this, EventArgs.Empty);
+        ClickedOutside?.Invoke(
+            this,
+            new OutsideClickEventArgs(
+                Volatile.Read(ref _outsideClickX),
+                Volatile.Read(ref _outsideClickY)));
     }
 
     private static bool IsMouseButtonDown(int message) => message is
