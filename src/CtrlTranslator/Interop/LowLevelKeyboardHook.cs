@@ -30,6 +30,8 @@ public sealed class LowLevelKeyboardHook : IDisposable
 
     public event EventHandler? DoubleTapped;
 
+    public event EventHandler? EscapePressed;
+
     public bool IsInstalled => _keyboardHookHandle != nint.Zero;
 
     public void Install()
@@ -132,6 +134,11 @@ public sealed class LowLevelKeyboardHook : IDisposable
                     bool isKeyUp = messageCode is NativeMethods.WmKeyUp or NativeMethods.WmSysKeyUp;
                     long nowTicks = Stopwatch.GetTimestamp();
 
+                    if (isKeyDown && data.VirtualKeyCode == NativeMethods.VkEscape)
+                    {
+                        _dispatcher.BeginInvoke(new Action(RaiseEscapePressed), DispatcherPriority.Input);
+                    }
+
                     if (_detector.ProcessKeyEvent(data.VirtualKeyCode, isKeyDown, isKeyUp, nowTicks))
                     {
                         _dispatcher.BeginInvoke(new Action(RaiseDoubleTapped), DispatcherPriority.Input);
@@ -175,6 +182,11 @@ public sealed class LowLevelKeyboardHook : IDisposable
     private void RaiseDoubleTapped()
     {
         DoubleTapped?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RaiseEscapePressed()
+    {
+        EscapePressed?.Invoke(this, EventArgs.Empty);
     }
 
     private static bool IsMouseButtonDown(int message) => message is
