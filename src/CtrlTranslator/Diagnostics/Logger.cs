@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace CtrlTranslator.Diagnostics;
 
@@ -10,9 +12,12 @@ namespace CtrlTranslator.Diagnostics;
 public static partial class Logger
 {
     private static readonly object SyncRoot = new();
+    private static readonly ConcurrentQueue<PendingLog> PendingLogs = new();
     private static string _logDirectory = string.Empty;
     private static string _apiKey = string.Empty;
     private static bool _initialized;
+    private static System.Threading.Timer? _queueTimer;
+    private static int _isDrainingQueue;
 
     public static string DataDirectory { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -29,6 +34,11 @@ public static partial class Logger
             Directory.CreateDirectory(_logDirectory);
             _initialized = true;
             DeleteExpiredLogs();
+            _queueTimer ??= new System.Threading.Timer(
+                static _ => DrainQueuedLogs(),
+                state: null,
+                dueTime: 250,
+                period: 250);
         }
     }
 
@@ -50,6 +60,21 @@ public static partial class Logger
             ? message
             : $"{message} | {exception.GetType().Name}: {exception.Message}{Environment.NewLine}{exception.StackTrace}";
         Write("错误", module, fullMessage);
+    }
+
+    /// <summary>
+    /// 供系统钩子回调使用：只把异常对象放入无锁队列，不做格式化或文件 IO。
+    /// </summary>
+    public static void EnqueueError(string module, string message, Exception exception)
+    {
+        PendingLogs.Enqueue(new PendingLog("错误", module, message, exception));
+    }
+
+    public static void Shutdown()
+    {
+        _queueTimer?.Dispose();
+        _queueTimer = null;
+        DrainQueuedLogs();
     }
 
     public static string Redact(string? value)
@@ -109,6 +134,41 @@ public static partial class Logger
             }
         }
     }
+
+    private static void DrainQueuedLogs()
+    {
+        if (Interlocked.Exchange(ref _isDrainingQueue, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            while (PendingLogs.TryDequeue(out PendingLog? pending))
+            {
+                string fullMessage = pending.Exception is null
+                    ? pending.Message
+                    : $"{pending.Message} | {pending.Exception.GetType().Name}: {pending.Exception.Message}"
+                        + $"{Environment.NewLine}{pending.Exception.StackTrace}";
+                Write(pending.Level, pending.Module, fullMessage);
+            }
+        }
+        catch (Exception exception)
+        {
+            // 主日志不可写时仍把队列异常落入临时目录，绝不静默吞掉。
+            string emergencyPath = Path.Combine(Path.GetTempPath(), "CtrlTranslator-emergency.log");
+            string safeMessage = Redact($"刷新钩子日志队列失败：{exception}");
+            File.AppendAllText(
+                emergencyPath,
+                $"[{DateTime.Now:O}] [错误] [日志] {safeMessage}{Environment.NewLine}");
+        }
+        finally
+        {
+            Volatile.Write(ref _isDrainingQueue, 0);
+        }
+    }
+
+    private sealed record PendingLog(string Level, string Module, string Message, Exception? Exception);
 
     [GeneratedRegex(@"(?i)sk-[a-z0-9_\-]{4,}", RegexOptions.CultureInvariant)]
     private static partial Regex ApiKeyPattern();

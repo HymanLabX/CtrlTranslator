@@ -1,8 +1,11 @@
+using System.Diagnostics;
 using System.Threading;
 using System.IO;
 using System.Windows;
 using System.Windows.Threading;
+using CtrlTranslator.Core;
 using CtrlTranslator.Diagnostics;
+using CtrlTranslator.Interop;
 using CtrlTranslator.Settings;
 using CtrlTranslator.UI;
 
@@ -23,6 +26,10 @@ public partial class App : System.Windows.Application
     private EventWaitHandle? _activationEvent;
     private RegisteredWaitHandle? _activationRegistration;
     private TrayIconController? _trayIcon;
+    private AppSettings? _settings;
+    private AppState? _appState;
+    private TextCapture? _textCapture;
+    private LowLevelKeyboardHook? _keyboardHook;
     private bool _loggerInitialized;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -48,6 +55,7 @@ public partial class App : System.Windows.Application
 
             SettingsStore settingsStore = new();
             AppSettings settings = settingsStore.LoadOrCreate();
+            _settings = settings;
             Logger.SetApiKey(settings.ApiKey);
 
             _trayIcon = new TrayIconController(settings, settingsStore);
@@ -56,13 +64,23 @@ public partial class App : System.Windows.Application
                 _trayIcon.ShowError(settingsStore.LastWarning);
             }
 
+            _appState = new AppState(settings);
+            _textCapture = new TextCapture(Dispatcher);
+            DoubleTapDetector detector = new(
+                settings.TriggerKey,
+                settings.DoubleTapIntervalMs,
+                settings.MaxKeyHoldMs);
+            _keyboardHook = new LowLevelKeyboardHook(Dispatcher, detector);
+            _keyboardHook.DoubleTapped += OnDoubleTapped;
+            _keyboardHook.Install();
+
             Logger.Info("应用", "CtrlTranslator 已启动，托盘图标已显示。");
         }
         catch (Exception exception)
         {
             TryLogStartupFailure(exception);
             System.Windows.MessageBox.Show(
-                "程序启动失败，详情已记录到日志。请检查数据文件夹权限后重试。",
+                "程序启动失败，详情已记录到日志。请重试；如果反复失败，可能是安全软件拦截了全局按键监听。",
                 "CtrlTranslator",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
@@ -73,6 +91,19 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         UnregisterGlobalExceptionHandlers();
+
+        try
+        {
+            if (_keyboardHook is not null)
+            {
+                _keyboardHook.DoubleTapped -= OnDoubleTapped;
+                _keyboardHook.Dispose();
+            }
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("应用", "卸载全局键盘钩子失败。", exception);
+        }
 
         try
         {
@@ -110,6 +141,7 @@ public partial class App : System.Windows.Application
         if (_loggerInitialized)
         {
             Logger.Info("应用", "CtrlTranslator 已退出。");
+            Logger.Shutdown();
         }
         base.OnExit(e);
     }
@@ -218,6 +250,80 @@ public partial class App : System.Windows.Application
         Logger.Error("全局异常", "后台任务发生未观察异常。", e.Exception);
         _trayIcon?.ShowError(UnexpectedErrorMessage);
         e.SetObserved();
+    }
+
+    private async void OnDoubleTapped(object? sender, EventArgs e)
+    {
+        try
+        {
+            AppState? appState = _appState;
+            TextCapture? textCapture = _textCapture;
+            if (appState is null || textCapture is null)
+            {
+                return;
+            }
+
+            // SPEC §2.2 的四项前置检查必须保持此顺序。
+            if (!appState.Enabled)
+            {
+                return;
+            }
+
+            ForegroundApp? foregroundApp = ForegroundApp.GetCurrent();
+            if (appState.IsBlacklisted(foregroundApp?.ProcessName))
+            {
+                return;
+            }
+
+            if (!appState.TryEnterDebounce(Stopwatch.GetTimestamp()))
+            {
+                return;
+            }
+
+            if (foregroundApp?.ProcessId == Environment.ProcessId)
+            {
+                return;
+            }
+
+            string? text = await textCapture.CaptureAsync(
+                clipboardWaitMs: GetClipboardWaitMilliseconds());
+            if (text is null)
+            {
+                return;
+            }
+
+            string preview = text[..Math.Min(50, text.Length)].ReplaceLineEndings(" ");
+            _trayIcon?.ShowInformation("CtrlTranslator", $"取到 {text.Length} 字：{preview}");
+
+            if (appState.DetailedLogging)
+            {
+                Logger.Info(
+                    "取词",
+                    $"取词成功，共 {text.Length} 字，来源程序：{foregroundApp?.ProcessName ?? "未知"}，原文：{text}");
+            }
+            else
+            {
+                Logger.Info(
+                    "取词",
+                    $"取词成功，共 {text.Length} 字，来源程序：{foregroundApp?.ProcessName ?? "未知"}。原文未记录。");
+            }
+        }
+        catch (ClipboardUnavailableException exception)
+        {
+            Logger.Error("取词", "剪贴板在重试后仍不可用。", exception);
+            _trayIcon?.ShowError("剪贴板正被其他程序占用，稍等一下再试。");
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("取词", "划词取词失败。", exception);
+            _trayIcon?.ShowError("取词没有完成，请重新选中文字后再试一次。详情已记录到日志。");
+        }
+    }
+
+    private int GetClipboardWaitMilliseconds()
+    {
+        // M3 接入设置界面前，此值由启动时读取的 settings.json 提供。
+        return Math.Clamp(_settings?.ClipboardWaitMs ?? 300, 100, 1000);
     }
 
     private static void TryLogStartupFailure(Exception exception)
