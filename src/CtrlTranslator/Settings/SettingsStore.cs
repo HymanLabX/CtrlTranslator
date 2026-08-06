@@ -40,10 +40,18 @@ public sealed class SettingsStore
         try
         {
             string json = File.ReadAllText(SettingsPath, Encoding.UTF8);
+            bool extraRequestBodyMissing = !ContainsProperty(json, nameof(AppSettings.ExtraRequestBody));
             AppSettings settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions)
                 ?? throw new JsonException("配置文件内容为空。");
             settings.Normalize();
             DecryptApiKey(settings);
+
+            // 老配置没有此字段时立即补写，空字符串则视为用户的明确选择并原样保留。
+            if (extraRequestBodyMissing && !TrySave(settings, out string? saveError))
+            {
+                LastWarning = saveError;
+            }
+
             return settings;
         }
         catch (JsonException exception)
@@ -169,5 +177,13 @@ public sealed class SettingsStore
         byte[] plainText = Encoding.UTF8.GetBytes(settings.ApiKey);
         byte[] cipherText = ProtectedData.Protect(plainText, optionalEntropy: null, DataProtectionScope.CurrentUser);
         settings.ApiKeyProtected = Convert.ToBase64String(cipherText);
+    }
+
+    private static bool ContainsProperty(string json, string propertyName)
+    {
+        using JsonDocument document = JsonDocument.Parse(json);
+        return document.RootElement.ValueKind == JsonValueKind.Object
+            && document.RootElement.EnumerateObject().Any(property =>
+                string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase));
     }
 }

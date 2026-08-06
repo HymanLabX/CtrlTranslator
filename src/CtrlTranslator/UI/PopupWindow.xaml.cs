@@ -81,9 +81,17 @@ public partial class PopupWindow : Window
 
     internal event EventHandler? SuppressReasoningWarningRequested;
 
+    internal event EventHandler? DisableThinkingRequested;
+
     internal string SourceText => _sourceText;
 
     internal string AppName => _appName;
+
+    internal void RestoreDisableThinkingButton()
+    {
+        DisableThinkingButton.Content = "关闭思考模式";
+        DisableThinkingButton.IsEnabled = true;
+    }
 
     internal void StartLoading()
     {
@@ -297,6 +305,13 @@ public partial class PopupWindow : Window
         ActionRequested?.Invoke(this, new PopupActionEventArgs(_noticeAction));
     }
 
+    private void DisableThinkingButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        DisableThinkingButton.IsEnabled = false;
+        DisableThinkingButton.Content = "正在重译…";
+        DisableThinkingRequested?.Invoke(this, EventArgs.Empty);
+    }
+
     private void NoticeDismissButton_OnClick(object sender, RoutedEventArgs e)
     {
         NoticeBorder.Visibility = Visibility.Collapsed;
@@ -409,10 +424,13 @@ public partial class PopupWindow : Window
     private void ShowReasoningWarning(string model)
     {
         ShowNotice(
-            $"⚠️ 你配置的模型「{model}」像是推理模型，它会先思考很久才输出，不适合划词翻译。建议换成快速模型。",
+            $"⚠️ 你配置的模型「{model}」正在“思考”，这会让翻译慢很多、也更费钱。",
             ErrorAction.Settings,
             "去设置",
             isWarning: true);
+        DisableThinkingButton.Content = "关闭思考模式";
+        DisableThinkingButton.IsEnabled = true;
+        DisableThinkingButton.Visibility = Visibility.Visible;
         NoticeDismissButton.Visibility = Visibility.Visible;
         NoticeDismissButton.Content = "不再提示";
     }
@@ -431,6 +449,7 @@ public partial class PopupWindow : Window
             : Visibility.Visible;
         if (!isWarning)
         {
+            DisableThinkingButton.Visibility = Visibility.Collapsed;
             NoticeDismissButton.Visibility = Visibility.Collapsed;
         }
 

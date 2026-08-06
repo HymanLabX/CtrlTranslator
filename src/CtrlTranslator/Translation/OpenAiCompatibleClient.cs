@@ -181,18 +181,19 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
 
         if (method == HttpMethod.Post)
         {
-            var body = new
+            var body = new Dictionary<string, object?>
             {
-                model = request.Model,
-                messages = new object[]
+                ["model"] = request.Model,
+                ["messages"] = new object[]
                 {
                     new { role = "system", content = request.SystemPrompt },
                     new { role = "user", content = request.UserContent }
                 },
-                temperature = request.Temperature,
-                max_tokens = request.MaxTokens,
-                stream = true
+                ["temperature"] = request.Temperature,
+                ["max_tokens"] = request.MaxTokens,
+                ["stream"] = true
             };
+            MergeExtraRequestBody(body, request.ExtraRequestBody);
             message.Content = new StringContent(
                 JsonSerializer.Serialize(body),
                 Encoding.UTF8,
@@ -200,6 +201,39 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
         }
 
         return message;
+    }
+
+    private static void MergeExtraRequestBody(
+        Dictionary<string, object?> body,
+        string? extraRequestBody)
+    {
+        if (string.IsNullOrWhiteSpace(extraRequestBody))
+        {
+            Logger.Info("翻译请求", "额外请求参数为空，已跳过合并。");
+            return;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(extraRequestBody);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                Logger.Warning("翻译请求", "额外请求参数不是 JSON 对象，已忽略，不影响本次翻译。");
+                return;
+            }
+
+            foreach (JsonProperty property in document.RootElement.EnumerateObject())
+            {
+                // 浅合并：只覆盖请求体顶层同名键，嵌套对象不递归合并。
+                body[property.Name] = property.Value.Clone();
+            }
+        }
+        catch (JsonException exception)
+        {
+            Logger.Warning(
+                "翻译请求",
+                $"额外请求参数不是合法 JSON，已忽略，不影响本次翻译：{exception.Message}");
+        }
     }
 
     private static void ParseChunk(string payload, out string delta, out bool sawReasoning)
@@ -262,7 +296,8 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
                 settings.Temperature,
                 settings.MaxTokens,
                 settings.RequestTimeoutSeconds,
-                settings.FirstTokenTimeoutSeconds);
+                settings.FirstTokenTimeoutSeconds,
+                settings.ExtraRequestBody);
             using HttpRequestMessage message = CreateRequest(request, HttpMethod.Get, "models");
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_warmupCancellation.Token);
             timeout.CancelAfter(TimeSpan.FromSeconds(10));

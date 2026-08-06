@@ -25,7 +25,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
-    <!-- 显式覆盖 Microsoft.Data.Sqlite 当前带入的有漏洞原生 SQLite 版本。 -->
+    <!-- 显式覆盖 Microsoft.Data.Sqlite 当前带入的漏洞版本：GHSA-2m69-gcr7-jv3q。 -->
     <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
   </ItemGroup>
 

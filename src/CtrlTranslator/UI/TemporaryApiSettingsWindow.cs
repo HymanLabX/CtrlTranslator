@@ -18,6 +18,7 @@ internal sealed class TemporaryApiSettingsWindow : Window
     private readonly System.Windows.Controls.TextBox _baseUrlBox;
     private readonly PasswordBox _apiKeyBox;
     private readonly System.Windows.Controls.TextBox _modelBox;
+    private readonly System.Windows.Controls.TextBox _extraRequestBodyBox;
 
     public TemporaryApiSettingsWindow(AppSettings settings, SettingsStore settingsStore)
     {
@@ -25,7 +26,7 @@ internal sealed class TemporaryApiSettingsWindow : Window
         _settingsStore = settingsStore;
         Title = "填写翻译服务";
         Width = 500;
-        Height = 270;
+        Height = 390;
         ResizeMode = ResizeMode.NoResize;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         ShowInTaskbar = false;
@@ -33,7 +34,7 @@ internal sealed class TemporaryApiSettingsWindow : Window
         var grid = new Grid { Margin = new Thickness(18) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        for (int index = 0; index < 5; index++)
+        for (int index = 0; index < 6; index++)
         {
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         }
@@ -41,9 +42,20 @@ internal sealed class TemporaryApiSettingsWindow : Window
         _baseUrlBox = new System.Windows.Controls.TextBox { Text = settings.BaseUrl, Margin = new Thickness(10, 5, 0, 5) };
         _apiKeyBox = new PasswordBox { Password = settings.ApiKey, Margin = new Thickness(10, 5, 0, 5) };
         _modelBox = new System.Windows.Controls.TextBox { Text = settings.Model, Margin = new Thickness(10, 5, 0, 5) };
+        _extraRequestBodyBox = new System.Windows.Controls.TextBox
+        {
+            Text = settings.ExtraRequestBody,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            FontFamily = new System.Windows.Media.FontFamily("Consolas"),
+            Height = 90,
+            Margin = new Thickness(10, 5, 0, 5)
+        };
         AddRow(grid, 0, "服务地址", _baseUrlBox);
         AddRow(grid, 1, "API Key", _apiKeyBox);
         AddRow(grid, 2, "模型名", _modelBox);
+        AddRow(grid, 3, "额外请求参数", _extraRequestBodyBox);
 
         var hint = new TextBlock
         {
@@ -51,7 +63,7 @@ internal sealed class TemporaryApiSettingsWindow : Window
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 10, 0, 12)
         };
-        Grid.SetRow(hint, 3);
+        Grid.SetRow(hint, 4);
         Grid.SetColumnSpan(hint, 2);
         grid.Children.Add(hint);
 
@@ -65,7 +77,7 @@ internal sealed class TemporaryApiSettingsWindow : Window
         var cancelButton = new WpfButton { Content = "取消", Width = 88, Margin = new Thickness(8, 0, 0, 0), IsCancel = true };
         buttons.Children.Add(saveButton);
         buttons.Children.Add(cancelButton);
-        Grid.SetRow(buttons, 4);
+        Grid.SetRow(buttons, 5);
         Grid.SetColumnSpan(buttons, 2);
         grid.Children.Add(buttons);
         Content = grid;
@@ -109,6 +121,7 @@ internal sealed class TemporaryApiSettingsWindow : Window
             _settings.BaseUrl = baseUrl;
             _settings.ApiKey = apiKey;
             _settings.Model = model;
+            _settings.ExtraRequestBody = _extraRequestBodyBox.Text.Trim();
             if (!_settingsStore.TrySave(_settings, out string? errorMessage))
             {
                 WpfMessageBox.Show(

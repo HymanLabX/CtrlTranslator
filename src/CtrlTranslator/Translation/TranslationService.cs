@@ -45,7 +45,8 @@ internal sealed class TranslationService : IDisposable
         string sourceText,
         string? appName,
         IProgress<TranslationStreamUpdate>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool bypassCache = false)
     {
         CancellationTokenSource ownCancellation = ReplaceCurrentCancellation(cancellationToken);
         try
@@ -59,7 +60,7 @@ internal sealed class TranslationService : IDisposable
                 prompt.Mode.Id,
                 settings.Model);
 
-            if (!settings.PrivacyMode)
+            if (!settings.PrivacyMode && !bypassCache)
             {
                 TranslationRecord? cached = await TryReadCacheAsync(cacheKey, ownCancellation.Token);
                 if (cached is not null)
@@ -81,6 +82,11 @@ internal sealed class TranslationService : IDisposable
                 }
             }
 
+            if (bypassCache)
+            {
+                Logger.Info("翻译", "本次重译已绕过缓存，将使用最新请求参数。");
+            }
+
             var request = new TranslationRequest(
                 settings.BaseUrl.Trim(),
                 settings.ApiKey.Trim(),
@@ -90,7 +96,8 @@ internal sealed class TranslationService : IDisposable
                 settings.Temperature,
                 settings.MaxTokens,
                 settings.RequestTimeoutSeconds,
-                settings.FirstTokenTimeoutSeconds);
+                settings.FirstTokenTimeoutSeconds,
+                settings.ExtraRequestBody);
 
             TranslationClientResult clientResult = await _client.TranslateAsync(
                 request,

@@ -3,6 +3,7 @@ using System.Threading;
 using System.IO;
 using System.Windows;
 using System.Windows.Threading;
+using System.Text.Json;
 using CtrlTranslator.Core;
 using CtrlTranslator.Data;
 using CtrlTranslator.Diagnostics;
@@ -377,7 +378,7 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private async Task StartTranslationAsync(string text, string? appName)
+    private async Task StartTranslationAsync(string text, string? appName, bool bypassCache = false)
     {
         TranslationService? service = _translationService;
         if (service is null)
@@ -401,7 +402,8 @@ public partial class App : System.Windows.Application
                 text,
                 appName,
                 progress,
-                CancellationToken.None);
+                CancellationToken.None,
+                bypassCache);
             if (ReferenceEquals(_popupWindow, popup))
             {
                 popup.ShowResult(result);
@@ -437,6 +439,7 @@ public partial class App : System.Windows.Application
         popup.ActionRequested += Popup_OnActionRequested;
         popup.StarredChanged += Popup_OnStarredChanged;
         popup.SuppressReasoningWarningRequested += Popup_OnSuppressReasoningWarningRequested;
+        popup.DisableThinkingRequested += Popup_OnDisableThinkingRequested;
         popup.Closed += Popup_OnClosed;
         _popupWindow = popup;
         popup.Show();
@@ -470,6 +473,7 @@ public partial class App : System.Windows.Application
             popup.ActionRequested -= Popup_OnActionRequested;
             popup.StarredChanged -= Popup_OnStarredChanged;
             popup.SuppressReasoningWarningRequested -= Popup_OnSuppressReasoningWarningRequested;
+            popup.DisableThinkingRequested -= Popup_OnDisableThinkingRequested;
             popup.Closed -= Popup_OnClosed;
             if (ReferenceEquals(_popupWindow, popup))
             {
@@ -543,6 +547,81 @@ public partial class App : System.Windows.Application
         {
             Logger.Error("设置", "保存推理模型提示设置失败。", exception);
         }
+    }
+
+    private async void Popup_OnDisableThinkingRequested(object? sender, EventArgs e)
+    {
+        try
+        {
+            if (sender is not PopupWindow popup || _settings is null || _settingsStore is null)
+            {
+                if (sender is PopupWindow unavailablePopup)
+                {
+                    unavailablePopup.RestoreDisableThinkingButton();
+                }
+
+                return;
+            }
+
+            _settings.ExtraRequestBody = AddThinkingDisabled(_settings.ExtraRequestBody);
+            if (!_settingsStore.TrySave(_settings, out string? errorMessage))
+            {
+                System.Windows.MessageBox.Show(
+                    errorMessage ?? "关闭思考模式的设置没有保存成功，请稍后再试。",
+                    "CtrlTranslator",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                popup.RestoreDisableThinkingButton();
+                return;
+            }
+
+            Logger.Info("设置", "已关闭模型思考模式，正在用新参数重新翻译。");
+            await StartTranslationAsync(popup.SourceText, popup.AppName, bypassCache: true);
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("设置", "关闭思考模式并重新翻译失败。", exception);
+            if (sender is PopupWindow popup && popup.IsVisible)
+            {
+                popup.RestoreDisableThinkingButton();
+            }
+
+            System.Windows.MessageBox.Show(
+                "关闭思考模式没有完成，详情已记录到日志。请稍后再试。",
+                "CtrlTranslator",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private static string AddThinkingDisabled(string? extraRequestBody)
+    {
+        var merged = new Dictionary<string, object?>();
+        if (!string.IsNullOrWhiteSpace(extraRequestBody))
+        {
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(extraRequestBody);
+                if (document.RootElement.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (JsonProperty property in document.RootElement.EnumerateObject())
+                    {
+                        merged[property.Name] = property.Value.Clone();
+                    }
+                }
+                else
+                {
+                    Logger.Warning("设置", "原额外请求参数不是 JSON 对象，将用关闭思考模式的默认值替换。");
+                }
+            }
+            catch (JsonException exception)
+            {
+                Logger.Warning("设置", $"原额外请求参数不是合法 JSON，将用关闭思考模式的默认值替换：{exception.Message}");
+            }
+        }
+
+        merged["thinking"] = new Dictionary<string, string> { ["type"] = "disabled" };
+        return JsonSerializer.Serialize(merged);
     }
 
     private void ReportUnhandledException()
