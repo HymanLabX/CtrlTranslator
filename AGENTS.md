@@ -41,15 +41,27 @@
 | 发布方式 | 自包含单文件 exe |
 | C# 语言特性 | 启用 `nullable`、`ImplicitUsings` |
 
-### 允许的 NuGet 依赖（**仅此三个**）
+### 允许的 NuGet 依赖
 
 ```
 Microsoft.Data.Sqlite
+SQLitePCLRaw.lib.e_sqlite3      ← 见下方说明，不要删
 System.Security.Cryptography.ProtectedData
 System.Speech
 ```
 
-**需要引入任何第四个包，必须先停下来征求同意，说明为什么标准库做不到。**
+> **`SQLitePCLRaw.lib.e_sqlite3` 为什么必须显式引用（不要"清理"掉它）**
+> `Microsoft.Data.Sqlite` 传递引入的版本是 2.1.11，存在**高严重性漏洞**
+> `NU1903 / GHSA-2m69-gcr7-jv3q`。必须显式 pin 到 **2.1.12 或更高**才能消除该警告。
+> 移除这一行会立刻产生 2 个 NU1903 警告，违反下方"0 警告"的交付门槛，并把漏洞放回来。
+> 实测验证过：移除 → 2 warnings；恢复 → 0 warnings。
+
+> `System.Security.Cryptography.ProtectedData` 在 `net10.0-windows` 下是**内置的**，
+> 实际不需要 `PackageReference`（M0 已验证）。保留在清单中仅为说明该 API 允许使用。
+
+**需要引入清单之外的包，必须先停下来征求同意，说明为什么标准库做不到。**
+唯一例外：**为修复已知安全漏洞而 pin 现有传递依赖的版本**，可以直接做，
+但必须在 csproj 里加一行中文注释写明 CVE/GHSA 编号，并在交付说明里提一句。
 托盘图标用 SDK 自带的 `System.Windows.Forms.NotifyIcon`（在 csproj 里开
 `<UseWindowsForms>true</UseWindowsForms>`），**不要引入第三方托盘库**。
 
