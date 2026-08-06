@@ -61,11 +61,15 @@
             <Border x:Name="NoticeBorder" Grid.Row="2" Margin="0,8,0,0" Padding="8"
                     CornerRadius="5" Visibility="Collapsed">
                 <DockPanel>
-                    <Button x:Name="NoticeActionButton" DockPanel.Dock="Right" Margin="8,0,0,0"
-                            Padding="8,2" Click="NoticeActionButton_OnClick" />
-                    <Button x:Name="NoticeDismissButton" DockPanel.Dock="Right" Margin="4,0,0,0"
-                            Padding="8,2" Content="关闭提示" Visibility="Collapsed"
-                            Click="NoticeDismissButton_OnClick" />
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
+                        <Button x:Name="DisableThinkingButton" Padding="8,2" Margin="0,0,4,0"
+                                Content="关闭思考模式" Visibility="Collapsed"
+                                Click="DisableThinkingButton_OnClick" />
+                        <Button x:Name="NoticeActionButton" Padding="8,2" Margin="0,0,4,0"
+                                Click="NoticeActionButton_OnClick" />
+                        <Button x:Name="NoticeDismissButton" Padding="8,2" Content="关闭提示"
+                                Visibility="Collapsed" Click="NoticeDismissButton_OnClick" />
+                    </StackPanel>
                     <TextBlock x:Name="NoticeText" TextWrapping="Wrap" VerticalAlignment="Center" />
                 </DockPanel>
             </Border>

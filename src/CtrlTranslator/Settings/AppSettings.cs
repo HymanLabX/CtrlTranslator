@@ -5,6 +5,8 @@ namespace CtrlTranslator.Settings;
 /// </summary>
 public sealed class AppSettings
 {
+    public const string DefaultExtraRequestBody = "{\"thinking\": {\"type\": \"disabled\"}}";
+
     public string BaseUrl { get; set; } = string.Empty;
 
     public string ApiKeyProtected { get; set; } = string.Empty;
@@ -21,6 +23,8 @@ public sealed class AppSettings
     public int RequestTimeoutSeconds { get; set; } = 60;
 
     public int FirstTokenTimeoutSeconds { get; set; } = 15;
+
+    public string ExtraRequestBody { get; set; } = DefaultExtraRequestBody;
 
     public string CurrentModeId { get; set; } = "auto";
 
@@ -71,6 +75,7 @@ public sealed class AppSettings
     {
         Modes ??= [];
         AppBlacklist ??= [];
+        ExtraRequestBody ??= DefaultExtraRequestBody;
 
         foreach (TranslationMode builtIn in BuiltInModes.CreateDefaults())
         {

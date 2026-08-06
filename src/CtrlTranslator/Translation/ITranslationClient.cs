@@ -19,7 +19,8 @@ internal sealed record TranslationRequest(
     double Temperature,
     int MaxTokens,
     int RequestTimeoutSeconds,
-    int FirstTokenTimeoutSeconds);
+    int FirstTokenTimeoutSeconds,
+    string ExtraRequestBody);
 
 internal sealed record TranslationStreamUpdate(
     string Delta,
