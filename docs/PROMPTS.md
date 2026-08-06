@@ -141,6 +141,62 @@ SPEC 已更新，请先重新阅读 docs/SPEC.md 的这三处，然后按新 SPE
 
 ---
 
+## M2.2 · 修 bug：浮窗底部按钮点不动 + 托盘增加思考模式开关
+
+```
+有一个已定位的 bug 要修，外加一个新功能。请先重新阅读 docs/SPEC.md 的
+§4.3（关闭行为，新增了「边界必须在原生窗口真正 resize 之后再刷新」的警告框）
+和 §12.1（托盘上的「关闭模型思考模式」勾选框）。
+
+【bug 现象】
+浮窗顶部工具条的按钮（复制、图钉、关闭、收藏）全部正常。
+但底部黄色警告条上的三个按钮（关闭思考模式 / 去设置 / 不再提示）点了完全没反应：
+- 日志里没有任何记录（既无成功日志也无错误日志）
+- settings.json 从未被写入（文件修改时间证明）
+- SuppressReasoningWarning 也一直是 false，说明另外两个按钮同样没触发
+XAML 的 Click 接线和 App.xaml.cs 的事件订阅经检查都是正确的。
+
+【已定位的根因】
+PopupWindow.RefreshPhysicalBounds() 用 GetWindowRect 取物理边界喂给鼠标钩子，
+它挂在 SizeChanged 上。但 WPF 的 SizeChanged 在布局阶段触发，
+原生窗口的 SetWindowPos 发生在之后 —— 此刻 GetWindowRect 返回的是变高之前的旧矩形。
+配合 SizeToContent="Height"，警告条出现让窗口变高后，
+底部新增的那一条（正好是警告条所在位置）被鼠标钩子判定为「窗外」，
+于是点击 → MouseHook_OnClickedOutside → Close()，按钮永远收不到点击。
+
+【要改的三件事】
+
+1. 修复边界刷新时序。按 SPEC §4.3 新增的两条要求做：
+   a) 边界刷新排到布局完成之后（Dispatcher.BeginInvoke + DispatcherPriority.Loaded，
+      或监听原生 WM_WINDOWPOSCHANGED）
+   b) 兜底：ClickedOutside 真正 Close() 之前，重新 GetWindowRect 复核一次，
+      确认点击点确实在窗外才关
+
+2. 给 App.xaml.cs 的 Popup_OnDisableThinkingRequested 那个静默 return 分支补日志。
+   用户触发的动作绝不允许无声失败 —— 这次排查就是被这个静默分支拖慢的。
+   全项目其他类似的静默 return 也一并检查补上。
+
+3. 按 SPEC §12.1 在托盘菜单增加「关闭模型思考模式」勾选框，
+   位置在「启用划词」和「隐私模式」之间。注意只增删 thinking 这一个键，
+   不要覆盖用户在 ExtraRequestBody 里手写的其他键。
+
+不要动其他已通过验收的功能。完成后必须自己执行 dotnet build -c Release
+确认 0 警告 0 错误。做完请说明：边界刷新改成了什么时机、兜底复核加在哪、
+以及托盘勾选框如何做到只增删 thinking 键。
+```
+
+**修复验收（5 条）**
+
+| # | 怎么验 | 通过标准 |
+|---|---|---|
+| 1 | 划词让黄色警告条出来，点「关闭思考模式」 | 按钮变「正在重译…」→ 浮窗**重新翻译一次**（有加载动画）→ 变快 → 警告条消失 |
+| 2 | 查 `%APPDATA%\CtrlTranslator\settings.json` | `ExtraRequestBody` 变成 `{"thinking":{"type":"disabled"}}`，且文件修改时间是刚才 |
+| 3 | 划**一段没翻过的新英文** | **不再出现黄色警告条**（这是上次失败的那一条） |
+| 4 | 再划词，点警告条上的「不再提示」 | 提示条消失，`SuppressReasoningWarning` 变 `true` |
+| 5 | 托盘右键 | 「启用划词」下方出现「关闭模型思考模式」勾选框，默认勾上；取消勾选后划新词 → 警告条回来；勾回来 → 消失 |
+
+---
+
 ## M3 · 设置 / 向导 / 诊断 / 生词本
 
 ```

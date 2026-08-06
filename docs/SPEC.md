@@ -170,6 +170,20 @@ SizeToContent      = Height（宽度固定，高度自适应，但受 PopupMaxHe
 > 必须用低级鼠标钩子（`WH_MOUSE_LL`）监听 `WM_LBUTTONDOWN`，
 > 判断点击点是否落在浮窗矩形之外，是则关闭。浮窗关闭时必须卸载鼠标钩子。
 
+> ⚠️ **边界必须在原生窗口真正 resize 之后再刷新（已踩坑）**
+> WPF 的 `SizeChanged` 在**布局阶段**触发，而原生窗口的 `SetWindowPos` 发生在**之后**。
+> 若此时调用 `GetWindowRect`，拿到的是**变化前的旧矩形**。
+> 配合 `SizeToContent="Height"`，窗口内容变高（例如底部弹出警告条）后，
+> 新增的那一条区域会被判定为"窗外" —— 用户点上面的按钮时浮窗直接关闭，
+> **按钮永远收不到点击**，且不产生任何日志，极难排查。
+>
+> 要求：
+> 1. 边界刷新必须排到布局完成之后，例如
+>    `Dispatcher.BeginInvoke(RefreshPhysicalBounds, DispatcherPriority.Loaded)`，
+>    或监听原生 `WM_WINDOWPOSCHANGED` 消息
+> 2. 兜底：`ClickedOutside` 真正执行关闭**之前**，重新 `GetWindowRect` 复核一次，
+>    确认点击点确实在窗外才关。这一步很便宜，但能挡住所有同类时序问题
+
 关闭浮窗时必须：停止朗读、取消进行中的翻译请求。
 
 ### 4.4 浮窗内容布局
@@ -720,6 +734,25 @@ CREATE INDEX IF NOT EXISTS idx_created   ON translations(created_at DESC);
   - `CtrlTranslator — 出现过错误，请查看日志`（见 §9.3 第 3 条）
 - 首次运行时图标可能被 Windows 折叠进任务栏的 `^` 里，这是系统默认行为，
   需在 README 中说明（见 §14）
+
+### 12.1 托盘上的「关闭模型思考模式」勾选框
+
+这是日常最常用的开关，必须放在托盘里一步可达，**不要只藏在设置的 JSON 字段里**。
+
+| 状态 | 行为 |
+|---|---|
+| **勾选（默认）** | `ExtraRequestBody` 写入 `{"thinking": {"type": "disabled"}}` |
+| 取消勾选 | 从 `ExtraRequestBody` 中移除 `thinking` 键；其余键原样保留 |
+
+- 切换后**立即保存设置并即时生效**，不需要重启
+- 若 `ExtraRequestBody` 当前是用户手写的其他内容（如通义的 `enable_thinking`），
+  只增删 `thinking` 这一个键，**不要覆盖用户的其他键**
+- 若 `ExtraRequestBody` 内容不是合法 JSON，勾选时用默认值覆盖它并写日志
+- 悬停提示：`关闭后翻译更快更省钱；遇到特别难的长句可临时取消勾选让模型思考`
+
+> 设置页里的「额外请求参数」文本框保留（§7.1），供换服务商时填写各家不同的写法
+> （通义 `enable_thinking`、OpenAI `reasoning_effort`）。
+> **托盘勾选框负责日常，文本框负责兼容性**，两者操作同一个字段。
 - **左键单击**：打开主窗口（历史与收藏）
 - **右键菜单**：
 
@@ -734,6 +767,7 @@ CREATE INDEX IF NOT EXISTS idx_created   ON translations(created_at DESC);
               ○ （用户自建的模式…）
 ─────────────
 ☑ 启用划词          ← 勾选框，即全局暂停开关
+☑ 关闭模型思考模式   ← 勾选框，见下方说明
 ☐ 隐私模式（不记录历史）
 ─────────────
 一键诊断…
