@@ -595,16 +595,31 @@ CREATE INDEX IF NOT EXISTS idx_created   ON translations(created_at DESC);
 
 ### 9.2 展示位置
 
+> ⚠️ **重要前提：不得依赖托盘气泡送达任何必须让用户看到的信息。**
+> 本机用户已在 Windows 中全局关闭通知（`HKCU\...\PushNotifications\ToastEnabled = 0`），
+> `NotifyIcon.ShowBalloonTip` 在这种情况下**静默失败、不报错、什么都不显示**。
+> 气泡只作为"有则更好"的补充，所有关键信息必须另有可靠通道。
+
 - 翻译相关的错误：显示在**浮窗内容区**，红色图标 + 文字 + 操作按钮
 - 后台错误（数据库、日志、预热）：只写日志，不打扰用户
-- 严重启动错误（无法创建数据目录等）：托盘气泡提示 + 写日志
+- 严重启动错误（无法创建数据目录、配置无法读写等）：
+  用 **`MessageBox`** 显示（模态、必定可见）+ 写日志。**不要用气泡。**
+- 一般性成功提示（取词成功、已复制等）：可以用气泡，但**必须同时**在界面上有
+  非气泡的反馈（按钮变文字、状态栏、窗口内提示），不能只靠气泡
 
 ### 9.3 全局异常兜底
 
 `App.xaml.cs` 中挂 `DispatcherUnhandledException`、`AppDomain.CurrentDomain.UnhandledException`、
-`TaskScheduler.UnobservedTaskException`。捕获后：写完整日志 → 托盘气泡显示
-「程序遇到了意外错误，已记录到日志。如果反复出现，请把日志发给开发者。」→
-尽可能不退出程序（`e.Handled = true`）。
+`TaskScheduler.UnobservedTaskException`。捕获后：
+
+1. 写完整日志
+2. **本次运行的第一次**未处理异常：弹 `MessageBox` 显示
+   「程序遇到了意外错误，已记录到日志。如果反复出现，请把日志发给开发者。」
+   并附「打开日志文件夹」按钮
+3. **之后的异常不再弹框**（避免异常风暴把屏幕刷满），改为把托盘图标切换到
+   **警告态**，悬停提示变为 `CtrlTranslator — 出现过错误，请查看日志`，
+   点击托盘图标可打开日志文件夹
+4. 尽可能不退出程序（`e.Handled = true`）
 
 ---
 
@@ -648,15 +663,21 @@ CREATE INDEX IF NOT EXISTS idx_created   ON translations(created_at DESC);
 4. **测试** —— 自动翻译 `Hello, world.`，成功则显示译文和耗时，
    按钮变为「完成」；失败则显示 §9.1 的人话错误 + 「返回上一步」+「打开一键诊断」
 
-完成后写入配置，关闭向导，托盘气泡提示
-「CtrlTranslator 已就绪。在任意程序里选中文字，快速双击 Ctrl 试试。」
+测试成功后，**在向导第 4 页界面内直接显示**：
+「✅ CtrlTranslator 已就绪。在任意程序里选中文字，快速双击 Ctrl 试试。」
+用户点「完成」写入配置并关闭向导。**不要用气泡传达这句话**（见 §9.2 前提）。
 
 ---
 
 ## 12. 托盘图标
 
 - 图标常驻通知区域；暂停时显示**灰色版本**的图标
-- 悬停提示：`CtrlTranslator — 划词已启用` / `CtrlTranslator — 已暂停`
+- 悬停提示随状态变化，是本程序**最可靠的状态通道**（不受系统通知设置影响）：
+  - `CtrlTranslator — 划词已启用`
+  - `CtrlTranslator — 已暂停`
+  - `CtrlTranslator — 出现过错误，请查看日志`（见 §9.3 第 3 条）
+- 首次运行时图标可能被 Windows 折叠进任务栏的 `^` 里，这是系统默认行为，
+  需在 README 中说明（见 §14）
 - **左键单击**：打开主窗口（历史与收藏）
 - **右键菜单**：
 
