@@ -244,6 +244,29 @@ SizeToContent      = Height（宽度固定，高度自适应，但受 PopupMaxHe
 **始终使用 `stream: true`**（即使 UI 默认攒完再显示），
 这样才能测量首字延迟、支持超时判断、并支持 §4.4 的流式回退。
 
+#### 额外请求参数（`ExtraRequestBody`）—— 关闭"思考模式"的通用机制
+
+**背景（实测）**：DeepSeek V4 系列（`deepseek-v4-flash` / `deepseek-v4-pro`）的
+`thinking` 参数**默认值是 `enabled`**。不显式关闭时，模型每次都会先长时间"思考"再输出译文。
+实测翻一句话耗时约 **4 秒**（目标是 1 秒内），且思考产生的 token 按输出价计费，
+用量可能翻十倍。**其他厂商也各有各的写法**，所以不能写死成某一家的开关。
+
+机制：设置中提供一个 **`ExtraRequestBody`** 字段，内容是一段 JSON 对象。
+构造请求时把它**浅合并**进请求体顶层；同名键以 `ExtraRequestBody` 为准（用户优先）。
+
+- **默认值**：`{"thinking": {"type": "disabled"}}`
+- 为空或解析失败时：跳过合并，写一条日志，**不要因此让翻译失败**
+- 解析失败时在设置界面上给出红色提示「这段不是合法的 JSON，已忽略」
+
+各厂商的关闭写法（用于 §7.1 的预设按钮）：
+
+| 服务商 | 填入内容 |
+|---|---|
+| DeepSeek V4 / 智谱 GLM | `{"thinking": {"type": "disabled"}}` |
+| 阿里通义千问 | `{"enable_thinking": false}` |
+| OpenAI GPT-5 系列 | `{"reasoning_effort": "minimal"}` |
+| 不需要 / 跟随服务商默认 | 留空 |
+
 ### 5.2 HttpClient 与连接预热
 
 - 全局**单例** `HttpClient`，底层 `SocketsHttpHandler`：
@@ -372,10 +395,20 @@ SizeToContent      = Height（宽度固定，高度自适应，但受 PopupMaxHe
 
 命中任一项，在浮窗底部显示一条可关闭的黄色提示条：
 
-> ⚠️ 你配置的模型「{model}」像是推理模型，它会先思考很久才输出，不适合划词翻译。
-> 建议换成快速模型。[去设置] [不再提示]
+> ⚠️ 你配置的模型「{model}」正在"思考"，这会让翻译慢很多、也更费钱。
+> [关闭思考模式] [去设置] [不再提示]
 
-「不再提示」写入设置 `SuppressReasoningWarning = true`。
+三个按钮的行为：
+
+| 按钮 | 行为 |
+|---|---|
+| **关闭思考模式** | 把 `ExtraRequestBody` 设为 `{"thinking": {"type": "disabled"}}`（若已有内容则合并该键）→ 保存设置 → **立刻用新参数重译当前这段文字** → 成功则提示条消失 |
+| 去设置 | 打开设置的「翻译服务」页并定位到 `ExtraRequestBody` 字段 |
+| 不再提示 | 写入 `SuppressReasoningWarning = true` |
+
+> 「关闭思考模式」是给不懂技术的用户准备的一键自救 —— 他不需要知道什么是 JSON，
+> 点一下就恢复正常速度。若该厂商用的不是 `thinking` 写法（如通义），
+> 这一键不会生效，此时才需要走「去设置」手动选预设。
 
 ### 5.7 推荐模型清单（用于引导向导和设置页的提示文字）
 
@@ -383,7 +416,7 @@ SizeToContent      = Height（宽度固定，高度自适应，但受 PopupMaxHe
 
 | 服务商 | Base URL | 推荐模型（快） |
 |---|---|---|
-| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
+| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-v4-flash`（**必须配合关闭思考**，见 §5.1） |
 | 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4-flash` |
 | 阿里通义 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-turbo` |
 | 月之暗面 Kimi | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` |
@@ -487,7 +520,16 @@ CREATE INDEX IF NOT EXISTS idx_created   ON translations(created_at DESC);
 | 最大输出长度 | 数字 | 2048 |
 | 请求超时（秒） | 数字 | 60 |
 | 首字超时（秒） | 数字 | 15 |
+| **额外请求参数** | 多行文本框（等宽字体）+ 预设按钮 | `{"thinking": {"type": "disabled"}}` |
 | **一键诊断** | 按钮 | — |
+
+「额外请求参数」下方放一排一键填入的预设按钮，用户不需要懂 JSON：
+
+`DeepSeek / 智谱：关闭思考` · `通义千问：关闭思考` · `OpenAI：最低推理` · `清空`
+
+并附一行说明：「大多数模型默认会先『思考』再回答，这让划词翻译又慢又贵。
+保持默认值即可；换了服务商发现变慢，就点对应的预设按钮。」
+内容非法 JSON 时输入框变红并提示，但**不阻止保存**（运行时会忽略并记日志）。
 
 「拉取可用模型」：GET `{BaseUrl}/models`，成功则把返回的模型 id 列表填进一个下拉框
 供用户选择；失败则提示「该服务商不支持列出模型，请到官网查看模型名后手动填写」。
