@@ -34,6 +34,12 @@ internal static class NativeMethods
     internal const ushort VkRMenu = 0xA5;
     internal const ushort VkLWin = 0x5B;
     internal const ushort VkRWin = 0x5C;
+    internal const ushort VkEscape = 0x1B;
+
+    internal const uint MonitorDefaultToNearest = 0x00000002;
+    internal const uint SwpNoSize = 0x0001;
+    internal const uint SwpNoZOrder = 0x0004;
+    internal const uint SwpNoActivate = 0x0010;
 
     internal const uint InputKeyboard = 1;
     internal const uint KeyEventFKeyUp = 0x0002;
@@ -69,6 +75,39 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern short GetAsyncKeyState(int virtualKey);
 
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetCursorPos(out Point point);
+
+    [DllImport("user32.dll")]
+    internal static extern nint MonitorFromPoint(Point point, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetMonitorInfo(nint monitor, ref MonitorInfo monitorInfo);
+
+    [DllImport("shcore.dll")]
+    internal static extern int GetDpiForMonitor(
+        nint monitor,
+        MonitorDpiType dpiType,
+        out uint dpiX,
+        out uint dpiY);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetWindowPos(
+        nint windowHandle,
+        nint insertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetWindowRect(nint windowHandle, out Rect rectangle);
+
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern uint SendInput(uint inputCount, Input[] inputs, int inputSize);
 
@@ -93,10 +132,33 @@ internal static class NativeMethods
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal readonly struct Point
+    internal readonly struct Point(int x, int y)
     {
-        internal readonly int X;
-        internal readonly int Y;
+        internal readonly int X = x;
+        internal readonly int Y = y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Rect
+    {
+        internal int Left;
+        internal int Top;
+        internal int Right;
+        internal int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct MonitorInfo
+    {
+        internal uint Size;
+        internal Rect Monitor;
+        internal Rect WorkArea;
+        internal uint Flags;
+    }
+
+    internal enum MonitorDpiType
+    {
+        EffectiveDpi = 0
     }
 
     [StructLayout(LayoutKind.Sequential)]

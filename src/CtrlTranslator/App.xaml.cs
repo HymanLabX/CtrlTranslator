@@ -4,10 +4,12 @@ using System.IO;
 using System.Windows;
 using System.Windows.Threading;
 using CtrlTranslator.Core;
+using CtrlTranslator.Data;
 using CtrlTranslator.Diagnostics;
 using CtrlTranslator.Interop;
 using CtrlTranslator.Settings;
 using CtrlTranslator.UI;
+using CtrlTranslator.Translation;
 
 namespace CtrlTranslator;
 
@@ -30,7 +32,11 @@ public partial class App : System.Windows.Application
     private AppState? _appState;
     private TextCapture? _textCapture;
     private LowLevelKeyboardHook? _keyboardHook;
+    private SettingsStore? _settingsStore;
+    private TranslationService? _translationService;
+    private PopupWindow? _popupWindow;
     private bool _loggerInitialized;
+    private int _unhandledExceptionReported;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -54,6 +60,7 @@ public partial class App : System.Windows.Application
             StartActivationListener();
 
             SettingsStore settingsStore = new();
+            _settingsStore = settingsStore;
             AppSettings settings = settingsStore.LoadOrCreate();
             _settings = settings;
             Logger.SetApiKey(settings.ApiKey);
@@ -61,8 +68,26 @@ public partial class App : System.Windows.Application
             _trayIcon = new TrayIconController(settings, settingsStore);
             if (!string.IsNullOrWhiteSpace(settingsStore.LastWarning))
             {
-                _trayIcon.ShowError(settingsStore.LastWarning);
+                System.Windows.MessageBox.Show(
+                    settingsStore.LastWarning,
+                    "CtrlTranslator",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
             }
+
+            Database database = new();
+            try
+            {
+                database.Initialize();
+            }
+            catch (Exception exception)
+            {
+                Logger.Error("数据库", "初始化历史数据库失败，翻译功能将继续运行。", exception);
+            }
+
+            _translationService = new TranslationService(
+                () => _settings ?? settings,
+                new HistoryRepository(database));
 
             _appState = new AppState(settings);
             _textCapture = new TextCapture(Dispatcher);
@@ -72,6 +97,7 @@ public partial class App : System.Windows.Application
                 settings.MaxKeyHoldMs);
             _keyboardHook = new LowLevelKeyboardHook(Dispatcher, detector);
             _keyboardHook.DoubleTapped += OnDoubleTapped;
+            _keyboardHook.EscapePressed += OnEscapePressed;
             _keyboardHook.Install();
 
             Logger.Info("应用", "CtrlTranslator 已启动，托盘图标已显示。");
@@ -94,9 +120,13 @@ public partial class App : System.Windows.Application
 
         try
         {
+            _popupWindow?.Close();
+            _translationService?.Dispose();
+
             if (_keyboardHook is not null)
             {
                 _keyboardHook.DoubleTapped -= OnDoubleTapped;
+                _keyboardHook.EscapePressed -= OnEscapePressed;
                 _keyboardHook.Dispose();
             }
         }
@@ -234,7 +264,7 @@ public partial class App : System.Windows.Application
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         Logger.Error("全局异常", "界面线程发生未处理异常。", e.Exception);
-        _trayIcon?.ShowError(UnexpectedErrorMessage);
+        ReportUnhandledException();
         e.Handled = true;
     }
 
@@ -242,13 +272,13 @@ public partial class App : System.Windows.Application
     {
         Exception? exception = e.ExceptionObject as Exception;
         Logger.Error("全局异常", "后台线程发生未处理异常。", exception);
-        _trayIcon?.ShowError(UnexpectedErrorMessage);
+        ReportUnhandledException();
     }
 
     private void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
     {
         Logger.Error("全局异常", "后台任务发生未观察异常。", e.Exception);
-        _trayIcon?.ShowError(UnexpectedErrorMessage);
+        ReportUnhandledException();
         e.SetObserved();
     }
 
@@ -292,9 +322,6 @@ public partial class App : System.Windows.Application
                 return;
             }
 
-            string preview = text[..Math.Min(50, text.Length)].ReplaceLineEndings(" ");
-            _trayIcon?.ShowInformation("CtrlTranslator", $"取到 {text.Length} 字：{preview}");
-
             if (appState.DetailedLogging)
             {
                 Logger.Info(
@@ -307,16 +334,239 @@ public partial class App : System.Windows.Application
                     "取词",
                     $"取词成功，共 {text.Length} 字，来源程序：{foregroundApp?.ProcessName ?? "未知"}。原文未记录。");
             }
+
+            if (text.Length > 20_000)
+            {
+                PopupWindow popup = CreatePopup(text, foregroundApp?.ProcessName);
+                popup.ShowTranslationError(new UserFacingError(
+                    $"选中内容过长（{text.Length} 字符），请分段翻译。单次上限 20000 字符。",
+                    ErrorAction.None,
+                    null));
+                return;
+            }
+
+            int threshold = _settings?.LongTextThreshold ?? 2_000;
+            if (threshold > 0 && text.Length > threshold)
+            {
+                double estimatedSeconds = text.Length / 1_000d * 3;
+                MessageBoxResult confirmation = System.Windows.MessageBox.Show(
+                    $"你选中了 {text.Length} 个字符，翻译它大约需要 {estimatedSeconds:F1} 秒并消耗较多额度。确定要翻译吗？",
+                    "确认翻译长文本",
+                    MessageBoxButton.OKCancel,
+                    MessageBoxImage.Question);
+                if (confirmation != MessageBoxResult.OK)
+                {
+                    return;
+                }
+            }
+
+            await StartTranslationAsync(text, foregroundApp?.ProcessName);
         }
         catch (ClipboardUnavailableException exception)
         {
             Logger.Error("取词", "剪贴板在重试后仍不可用。", exception);
-            _trayIcon?.ShowError("剪贴板正被其他程序占用，稍等一下再试。");
+            ShowCaptureError(ErrorMessages.FromException(exception, _settings?.Model ?? string.Empty));
         }
         catch (Exception exception)
         {
             Logger.Error("取词", "划词取词失败。", exception);
-            _trayIcon?.ShowError("取词没有完成，请重新选中文字后再试一次。详情已记录到日志。");
+            ShowCaptureError(new UserFacingError(
+                "取词没有完成，请重新选中文字后再试一次。详情已记录到日志。",
+                ErrorAction.None,
+                null));
+        }
+    }
+
+    private async Task StartTranslationAsync(string text, string? appName)
+    {
+        TranslationService? service = _translationService;
+        if (service is null)
+        {
+            return;
+        }
+
+        PopupWindow popup = CreatePopup(text, appName);
+        popup.StartLoading();
+        var progress = new Progress<TranslationStreamUpdate>(update =>
+        {
+            if (ReferenceEquals(_popupWindow, popup))
+            {
+                popup.AppendStream(update);
+            }
+        });
+
+        try
+        {
+            TranslationResult result = await service.TranslateAsync(
+                text,
+                appName,
+                progress,
+                CancellationToken.None);
+            if (ReferenceEquals(_popupWindow, popup))
+            {
+                popup.ShowResult(result);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.Info("翻译", "翻译请求已取消。");
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("翻译", "翻译请求失败。", exception);
+            if (ReferenceEquals(_popupWindow, popup))
+            {
+                popup.ShowTranslationError(ErrorMessages.FromException(
+                    exception,
+                    _settings?.Model ?? string.Empty));
+            }
+        }
+    }
+
+    private PopupWindow CreatePopup(string text, string? appName)
+    {
+        if (_popupWindow is not null)
+        {
+            PopupWindow oldPopup = _popupWindow;
+            _popupWindow = null;
+            oldPopup.Close();
+        }
+
+        var popup = new PopupWindow(text, appName, _settings ?? new AppSettings());
+        popup.ClosingRequested += Popup_OnClosingRequested;
+        popup.ActionRequested += Popup_OnActionRequested;
+        popup.StarredChanged += Popup_OnStarredChanged;
+        popup.SuppressReasoningWarningRequested += Popup_OnSuppressReasoningWarningRequested;
+        popup.Closed += Popup_OnClosed;
+        _popupWindow = popup;
+        popup.Show();
+        return popup;
+    }
+
+    private void ShowCaptureError(UserFacingError error)
+    {
+        PopupWindow popup = CreatePopup(string.Empty, null);
+        popup.ShowTranslationError(error);
+    }
+
+    private void OnEscapePressed(object? sender, EventArgs e)
+    {
+        _popupWindow?.Close();
+    }
+
+    private void Popup_OnClosingRequested(object? sender, EventArgs e)
+    {
+        if (ReferenceEquals(_popupWindow, sender))
+        {
+            _translationService?.CancelCurrent();
+        }
+    }
+
+    private void Popup_OnClosed(object? sender, EventArgs e)
+    {
+        if (sender is PopupWindow popup)
+        {
+            popup.ClosingRequested -= Popup_OnClosingRequested;
+            popup.ActionRequested -= Popup_OnActionRequested;
+            popup.StarredChanged -= Popup_OnStarredChanged;
+            popup.SuppressReasoningWarningRequested -= Popup_OnSuppressReasoningWarningRequested;
+            popup.Closed -= Popup_OnClosed;
+            if (ReferenceEquals(_popupWindow, popup))
+            {
+                _popupWindow = null;
+            }
+        }
+    }
+
+    private void Popup_OnActionRequested(object? sender, PopupActionEventArgs e)
+    {
+        try
+        {
+            switch (e.Action)
+            {
+                case ErrorAction.Settings:
+                    _trayIcon?.OpenTemporaryApiSettings();
+                    break;
+                case ErrorAction.Retry when sender is PopupWindow retryPopup:
+                    _ = StartTranslationAsync(retryPopup.SourceText, retryPopup.AppName);
+                    break;
+                case ErrorAction.Diagnostics:
+                    System.Windows.MessageBox.Show(
+                        "请先检查网络和翻译服务配置。完整的一键诊断将在下一里程碑提供；当前可打开日志查看详情。",
+                        "一键诊断",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                    break;
+                case ErrorAction.OpenLog:
+                    _trayIcon?.OpenLogDirectory();
+                    break;
+            }
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("浮窗", "执行错误修复操作失败。", exception);
+        }
+    }
+
+    private async void Popup_OnStarredChanged(object? sender, StarredChangedEventArgs e)
+    {
+        try
+        {
+            if (_translationService is not null)
+            {
+                await _translationService.SetStarredAsync(e.RecordId, e.Starred, CancellationToken.None);
+                Logger.Info("收藏", e.Starred ? "翻译已收藏。" : "翻译已取消收藏。");
+            }
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("收藏", "收藏状态没有保存成功。", exception);
+        }
+    }
+
+    private void Popup_OnSuppressReasoningWarningRequested(object? sender, EventArgs e)
+    {
+        try
+        {
+            if (_settings is null || _settingsStore is null)
+            {
+                return;
+            }
+
+            _settings.SuppressReasoningWarning = true;
+            if (!_settingsStore.TrySave(_settings, out string? errorMessage))
+            {
+                Logger.Warning("设置", errorMessage ?? "保存推理模型提示设置失败。");
+            }
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("设置", "保存推理模型提示设置失败。", exception);
+        }
+    }
+
+    private void ReportUnhandledException()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(new Action(ReportUnhandledException));
+            return;
+        }
+
+        _trayIcon?.SetWarningState();
+        if (Interlocked.Exchange(ref _unhandledExceptionReported, 1) != 0)
+        {
+            return;
+        }
+
+        MessageBoxResult result = System.Windows.MessageBox.Show(
+            $"{UnexpectedErrorMessage}\n\n是否打开日志文件夹？",
+            "CtrlTranslator",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Error);
+        if (result == MessageBoxResult.Yes)
+        {
+            _trayIcon?.OpenLogDirectory();
         }
     }
 

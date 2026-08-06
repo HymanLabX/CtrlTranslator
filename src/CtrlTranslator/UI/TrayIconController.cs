@@ -1,4 +1,6 @@
 using System.Drawing;
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Resources;
 using CtrlTranslator.Diagnostics;
@@ -35,6 +37,7 @@ public sealed class TrayIconController : IDisposable
         _menu = new Forms.ContextMenuStrip();
         _menu.Items.Add(CreateActionItem("打开主窗口", ShowLaterMessage));
         _menu.Items.Add(CreateActionItem("设置…", ShowLaterMessage));
+        _menu.Items.Add(CreateActionItem("填写 API Key…", () => OpenTemporaryApiSettings()));
         _menu.Items.Add(new Forms.ToolStripSeparator());
 
         Forms.ToolStripMenuItem modesItem = new("翻译模式");
@@ -71,7 +74,7 @@ public sealed class TrayIconController : IDisposable
         _menu.Items.Add(new Forms.ToolStripSeparator());
 
         _menu.Items.Add(CreateActionItem("一键诊断…", ShowLaterMessage));
-        _menu.Items.Add(CreateActionItem("打开日志文件夹", ShowLaterMessage));
+        _menu.Items.Add(CreateActionItem("打开日志文件夹", OpenLogDirectory));
         _menu.Items.Add(new Forms.ToolStripSeparator());
         _menu.Items.Add(CreateActionItem("关于", ShowLaterMessage));
         _menu.Items.Add(CreateActionItem("退出", () => System.Windows.Application.Current.Shutdown()));
@@ -99,6 +102,27 @@ public sealed class TrayIconController : IDisposable
         _notifyIcon.BalloonTipText = message;
         _notifyIcon.BalloonTipIcon = Forms.ToolTipIcon.Error;
         _notifyIcon.ShowBalloonTip(5000);
+    }
+
+    public bool OpenTemporaryApiSettings()
+    {
+        var window = new TemporaryApiSettingsWindow(_settings, _settingsStore);
+        return window.ShowDialog() == true;
+    }
+
+    public void OpenLogDirectory()
+    {
+        Directory.CreateDirectory(Logger.LogDirectory);
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = Logger.LogDirectory,
+            UseShellExecute = true
+        });
+    }
+
+    public void SetWarningState()
+    {
+        _notifyIcon.Text = "CtrlTranslator — 出现过错误，请查看日志";
     }
 
     public void Dispose()
