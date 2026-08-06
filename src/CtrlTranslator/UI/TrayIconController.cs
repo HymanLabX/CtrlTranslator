@@ -23,6 +23,7 @@ public sealed class TrayIconController : IDisposable
     private readonly Icon _enabledIcon;
     private readonly Icon _pausedIcon;
     private readonly Forms.ToolStripMenuItem _enabledItem;
+    private readonly Forms.ToolStripMenuItem _thinkingDisabledItem;
     private readonly Forms.ToolStripMenuItem _privacyItem;
     private readonly List<Forms.ToolStripMenuItem> _modeItems = [];
     private bool _disposed;
@@ -64,6 +65,16 @@ public sealed class TrayIconController : IDisposable
         _enabledItem.Click += (_, _) => ExecuteSafely("切换启用状态", ToggleEnabled);
         _menu.Items.Add(_enabledItem);
 
+        _thinkingDisabledItem = new Forms.ToolStripMenuItem("关闭模型思考模式")
+        {
+            CheckOnClick = true,
+            Checked = ExtraRequestBodyHelper.IsThinkingDisabled(_settings.ExtraRequestBody),
+            ToolTipText = "关闭后翻译更快更省钱；遇到特别难的长句可临时取消勾选让模型思考"
+        };
+        _thinkingDisabledItem.Click += (_, _) =>
+            ExecuteSafely("切换模型思考模式", ToggleThinkingDisabled);
+        _menu.Items.Add(_thinkingDisabledItem);
+
         _privacyItem = new Forms.ToolStripMenuItem("隐私模式（不记录历史）")
         {
             CheckOnClick = true,
@@ -85,6 +96,7 @@ public sealed class TrayIconController : IDisposable
             Visible = true
         };
         _notifyIcon.MouseClick += NotifyIconOnMouseClick;
+        _menu.Opening += Menu_OnOpening;
         RefreshVisualState();
     }
 
@@ -107,7 +119,13 @@ public sealed class TrayIconController : IDisposable
     public bool OpenTemporaryApiSettings()
     {
         var window = new TemporaryApiSettingsWindow(_settings, _settingsStore);
-        return window.ShowDialog() == true;
+        bool saved = window.ShowDialog() == true;
+        if (saved)
+        {
+            RefreshThinkingDisabledState();
+        }
+
+        return saved;
     }
 
     public void OpenLogDirectory()
@@ -135,6 +153,7 @@ public sealed class TrayIconController : IDisposable
         _disposed = true;
         _notifyIcon.Visible = false;
         _notifyIcon.MouseClick -= NotifyIconOnMouseClick;
+        _menu.Opening -= Menu_OnOpening;
         _notifyIcon.Dispose();
         _menu.Dispose();
         _enabledIcon.Dispose();
@@ -185,6 +204,31 @@ public sealed class TrayIconController : IDisposable
         Logger.Info("托盘", _settings.PrivacyMode ? "隐私模式已启用。" : "隐私模式已关闭。");
     }
 
+    private void ToggleThinkingDisabled()
+    {
+        bool disabled = _thinkingDisabledItem.Checked;
+        string previousValue = _settings.ExtraRequestBody;
+        _settings.ExtraRequestBody = ExtraRequestBodyHelper.SetThinkingDisabled(
+            previousValue,
+            disabled);
+
+        if (!_settingsStore.TrySave(_settings, out string? errorMessage))
+        {
+            _settings.ExtraRequestBody = previousValue;
+            _thinkingDisabledItem.Checked = !disabled;
+            System.Windows.MessageBox.Show(
+                errorMessage ?? "思考模式设置保存失败，请稍后重试。",
+                "CtrlTranslator",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return;
+        }
+
+        Logger.Info(
+            "托盘",
+            disabled ? "模型思考模式已关闭。" : "模型思考模式已恢复为服务商默认状态。");
+    }
+
     private void SelectMode(string modeId)
     {
         _settings.CurrentModeId = modeId;
@@ -203,6 +247,17 @@ public sealed class TrayIconController : IDisposable
         _notifyIcon.Text = _settings.Enabled
             ? "CtrlTranslator — 划词已启用"
             : "CtrlTranslator — 已暂停";
+    }
+
+    private void Menu_OnOpening(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        RefreshThinkingDisabledState();
+    }
+
+    private void RefreshThinkingDisabledState()
+    {
+        _thinkingDisabledItem.Checked = ExtraRequestBodyHelper.IsThinkingDisabled(
+            _settings.ExtraRequestBody);
     }
 
     private void SaveSettings()
