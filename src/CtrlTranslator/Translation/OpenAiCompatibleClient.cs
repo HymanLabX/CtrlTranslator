@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using CtrlTranslator.Diagnostics;
@@ -201,6 +202,22 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    internal static async Task<HttpStatusCode> ProbeModelsAsync(
+        string baseUrl,
+        string apiKey,
+        CancellationToken cancellationToken)
+    {
+        using var message = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{baseUrl.TrimEnd('/')}/models");
+        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        using HttpResponseMessage response = await SharedHttpClient.SendAsync(
+            message,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        return response.StatusCode;
     }
 
     public void Dispose()

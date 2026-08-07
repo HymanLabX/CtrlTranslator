@@ -339,8 +339,10 @@
                         <WrapPanel Grid.Row="7" Grid.Column="1" Margin="0,8,0,8">
                             <Button Padding="12,4" Margin="0,0,8,0" Content="打开日志文件夹"
                                     Tag="logs" Click="OpenFolderButton_OnClick" />
-                            <Button Padding="12,4" Content="打开数据文件夹"
+                            <Button Padding="12,4" Margin="0,0,8,0" Content="打开数据文件夹"
                                     Tag="data" Click="OpenFolderButton_OnClick" />
+                            <Button Padding="12,4" Content="导出历史为 CSV…"
+                                    Click="ExportHistoryButton_OnClick" />
                         </WrapPanel>
                         <TextBlock Grid.Row="8" Grid.ColumnSpan="2" Margin="0,18,0,0" Padding="12"
                                    Background="#F3F4F5" TextWrapping="Wrap"
