@@ -9,17 +9,73 @@
         Topmost="True"
         ShowInTaskbar="False"
         ResizeMode="CanResize"
-        SizeToContent="Height">
+        SizeToContent="Height"
+        Opacity="0">
+    <Window.Resources>
+        <Style x:Key="PopupIconPath" TargetType="Path">
+            <Setter Property="Width" Value="16" />
+            <Setter Property="Height" Value="16" />
+            <Setter Property="Stretch" Value="Uniform" />
+            <Setter Property="Stroke" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+            <Setter Property="StrokeThickness" Value="1.5" />
+            <Setter Property="StrokeStartLineCap" Value="Round" />
+            <Setter Property="StrokeEndLineCap" Value="Round" />
+            <Setter Property="StrokeLineJoin" Value="Round" />
+            <Setter Property="Fill" Value="{DynamicResource Brush.Transparent}" />
+        </Style>
+        <DataTemplate x:Key="IconTemplate.Speech">
+            <Path x:Name="Icon" Style="{StaticResource PopupIconPath}" Data="{DynamicResource Icon.Speaker}" />
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding}" Value="⏹">
+                    <Setter TargetName="Icon" Property="Data" Value="{DynamicResource Icon.Stop}" />
+                    <Setter TargetName="Icon" Property="Fill" Value="{DynamicResource Brush.Accent}" />
+                    <Setter TargetName="Icon" Property="Stroke" Value="{DynamicResource Brush.Accent}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+        <DataTemplate x:Key="IconTemplate.Star">
+            <Path x:Name="Icon" Style="{StaticResource PopupIconPath}" Data="{DynamicResource Icon.Star}" />
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding}" Value="★">
+                    <Setter TargetName="Icon" Property="Data" Value="{DynamicResource Icon.StarFilled}" />
+                    <Setter TargetName="Icon" Property="Fill" Value="{DynamicResource Brush.Accent}" />
+                    <Setter TargetName="Icon" Property="Stroke" Value="{DynamicResource Brush.Accent}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+        <DataTemplate x:Key="IconTemplate.Copy">
+            <Path x:Name="Icon" Style="{StaticResource PopupIconPath}" Data="{DynamicResource Icon.Copy}" />
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding}" Value="已复制">
+                    <Setter TargetName="Icon" Property="Data" Value="{DynamicResource Icon.Check}" />
+                    <Setter TargetName="Icon" Property="Stroke" Value="{DynamicResource Brush.Accent}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+        <DataTemplate x:Key="IconTemplate.Pin">
+            <Path x:Name="Icon" Style="{StaticResource PopupIconPath}" Data="{DynamicResource Icon.Pin}" />
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding}" Value="📍">
+                    <Setter TargetName="Icon" Property="Stroke" Value="{DynamicResource Brush.Accent}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+        <DataTemplate x:Key="IconTemplate.Close">
+            <Path Style="{StaticResource PopupIconPath}" Data="{DynamicResource Icon.Close}" />
+        </DataTemplate>
+    </Window.Resources>
+
     <Border x:Name="ShellBorder"
-            CornerRadius="8"
+            Background="{DynamicResource Brush.Surface}"
+            BorderBrush="{DynamicResource Brush.Border}"
+            CornerRadius="{DynamicResource Radius.Large}"
             BorderThickness="1"
-            Padding="12">
-        <Border.Effect>
-            <DropShadowEffect BlurRadius="14" ShadowDepth="3" Opacity="0.24" />
-        </Border.Effect>
+            Padding="16"
+            Effect="{DynamicResource Effect.PopupShadow}">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="28" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
@@ -34,43 +90,85 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <Button x:Name="SpeechButton" Grid.Column="0" Width="28" Height="24"
-                        Content="🔊" ToolTip="朗读原文" Click="SpeechButton_OnClick" />
-                <Button x:Name="StarButton" Grid.Column="1" Width="28" Height="24" Margin="4,0,0,0"
-                        Content="☆" ToolTip="收藏" Click="StarButton_OnClick" />
-                <Button x:Name="CopyButton" Grid.Column="2" Width="56" Height="24" Margin="4,0,0,0"
-                        Content="📋" ToolTip="复制译文" Click="CopyButton_OnClick" />
-                <Button x:Name="PinButton" Grid.Column="4" Width="28" Height="24"
-                        Content="📌" ToolTip="钉住" Click="PinButton_OnClick" />
-                <Button Grid.Column="5" Width="28" Height="24" Margin="4,0,0,0"
-                        Content="✕" ToolTip="关闭" Click="CloseButton_OnClick" />
+                <Button x:Name="SpeechButton" Grid.Column="0"
+                        Style="{StaticResource Button.Icon}"
+                        Content="🔊" ContentTemplate="{StaticResource IconTemplate.Speech}"
+                        ToolTip="朗读原文" Click="SpeechButton_OnClick" />
+                <Button x:Name="StarButton" Grid.Column="1" Margin="4,0,0,0"
+                        Style="{StaticResource Button.Icon}"
+                        Content="☆" ContentTemplate="{StaticResource IconTemplate.Star}"
+                        ToolTip="收藏" Click="StarButton_OnClick" />
+                <Button x:Name="CopyButton" Grid.Column="2" Margin="4,0,0,0"
+                        Style="{StaticResource Button.Icon}"
+                        Content="📋" ContentTemplate="{StaticResource IconTemplate.Copy}"
+                        ToolTip="复制译文" Click="CopyButton_OnClick" />
+                <Button x:Name="PinButton" Grid.Column="4"
+                        Style="{StaticResource Button.Icon}"
+                        Content="📌" ContentTemplate="{StaticResource IconTemplate.Pin}"
+                        ToolTip="钉住" Click="PinButton_OnClick" />
+                <Button Grid.Column="5" Margin="4,0,0,0"
+                        Style="{StaticResource Button.Icon}"
+                        Content="✕" ContentTemplate="{StaticResource IconTemplate.Close}"
+                        ToolTip="关闭" Click="CloseButton_OnClick" />
             </Grid>
 
-            <Grid Grid.Row="1" Margin="0,8,0,0">
-                <StackPanel x:Name="LoadingPanel" HorizontalAlignment="Center" Margin="8">
-                    <ProgressBar Width="160" Height="4" IsIndeterminate="True" />
-                    <TextBlock x:Name="LoadingText" Margin="0,8,0,0"
-                               HorizontalAlignment="Center" Text="翻译中…（已等待 0.0 秒）" />
+            <Border Grid.Row="1" Height="1" Margin="0,12"
+                    Background="{DynamicResource Brush.Border}" />
+
+            <Grid Grid.Row="2">
+                <StackPanel x:Name="LoadingPanel" Orientation="Horizontal"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" Margin="8,4">
+                    <Viewbox Width="12" Height="12" Margin="0,0,8,0">
+                        <Path Data="M8,1.25 A6.75,6.75 0 1 1 3.23,3.23"
+                              Stroke="{DynamicResource Brush.TextSecondary}"
+                              StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              RenderTransformOrigin="0.5,0.5">
+                            <Path.RenderTransform><RotateTransform /></Path.RenderTransform>
+                            <Path.Triggers>
+                                <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                                    <BeginStoryboard>
+                                        <Storyboard RepeatBehavior="Forever">
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.Angle"
+                                                             From="0" To="360" Duration="0:0:0.8" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </EventTrigger>
+                            </Path.Triggers>
+                        </Path>
+                    </Viewbox>
+                    <TextBlock x:Name="LoadingText" VerticalAlignment="Center"
+                               Foreground="{DynamicResource Brush.TextSecondary}"
+                               Text="翻译中… 0.0s" />
                 </StackPanel>
                 <FlowDocumentScrollViewer x:Name="ContentViewer"
                                           Visibility="Collapsed"
+                                          Background="{DynamicResource Brush.Transparent}"
+                                          Foreground="{DynamicResource Brush.Text}"
+                                          BorderThickness="0"
                                           VerticalScrollBarVisibility="Auto"
                                           HorizontalScrollBarVisibility="Disabled"
                                           IsToolBarVisible="False" />
             </Grid>
 
-            <Border x:Name="NoticeBorder" Grid.Row="2" Margin="0,8,0,0" Padding="8"
-                    CornerRadius="5" Visibility="Collapsed">
-                <DockPanel>
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
-                        <Button x:Name="DisableThinkingButton" Padding="8,2" Margin="0,0,4,0"
+            <Border x:Name="NoticeBorder" Grid.Row="3" Margin="0,12,0,0" Padding="12"
+                    CornerRadius="{DynamicResource Radius.Medium}" Visibility="Collapsed">
+                <DockPanel LastChildFill="True">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
+                        <Button x:Name="DisableThinkingButton" Margin="0,0,4,0"
+                                Style="{StaticResource Button.Primary}"
                                 Content="关闭思考模式" Visibility="Collapsed"
                                 Click="DisableThinkingButton_OnClick" />
-                        <Button x:Name="NoticeActionButton" Padding="8,2" Margin="0,0,4,0"
+                        <Button x:Name="NoticeActionButton" Margin="0,0,4,0"
+                                Style="{StaticResource Button.Secondary}"
                                 Click="NoticeActionButton_OnClick" />
-                        <Button x:Name="NoticeDismissButton" Padding="8,2" Content="关闭提示"
-                                Visibility="Collapsed" Click="NoticeDismissButton_OnClick" />
+                        <Button x:Name="NoticeDismissButton" Style="{StaticResource Button.Ghost}"
+                                Content="关闭提示" Visibility="Collapsed"
+                                Click="NoticeDismissButton_OnClick" />
                     </StackPanel>
+                    <Path x:Name="NoticeIcon" DockPanel.Dock="Left" Width="16" Height="16"
+                          Margin="0,1,8,0" VerticalAlignment="Top" Stretch="Uniform"
+                          StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                          StrokeLineJoin="Round" />
                     <TextBlock x:Name="NoticeText" TextWrapping="Wrap" VerticalAlignment="Center" />
                 </DockPanel>
             </Border>

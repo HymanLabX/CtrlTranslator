@@ -7,15 +7,13 @@ using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using CtrlTranslator.Diagnostics;
 using CtrlTranslator.Interop;
 using CtrlTranslator.Settings;
 using CtrlTranslator.Speech;
 using CtrlTranslator.Translation;
-using Microsoft.Win32;
-using Color = System.Windows.Media.Color;
-using FontFamily = System.Windows.Media.FontFamily;
 using WpfClipboard = System.Windows.Clipboard;
 using WpfTextDataFormat = System.Windows.TextDataFormat;
 
@@ -64,16 +62,11 @@ public partial class PopupWindow : Window
         Width = Math.Clamp(settings.PopupMaxWidth, 260, 900);
         MaxHeight = Math.Clamp(settings.PopupMaxHeight, 180, 900);
         ContentViewer.FontSize = Math.Clamp(settings.PopupFontSize, 10, 24);
-        ApplyTheme();
         InitializeSpeechButton();
         if (_speechService is not null)
         {
             _speechService.SpeakCompleted += SpeechService_OnSpeakCompleted;
         }
-
-        // 系统深浅色切换时，连当前已打开的浮窗也一起换色。
-        // SystemEvents 是静态事件，持有强引用，必须在 OnClosed 里解绑，否则浮窗会泄漏。
-        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
         _mouseHook = new LowLevelMouseHook(Dispatcher);
         _mouseHook.ClickedOutside += MouseHook_OnClickedOutside;
@@ -206,6 +199,12 @@ public partial class PopupWindow : Window
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        BeginAnimation(
+            OpacityProperty,
+            new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(140))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            });
         RepositionAndRefreshBounds();
     }
 
@@ -223,7 +222,6 @@ public partial class PopupWindow : Window
     {
         _isClosed = true;
         _loadingTimer.Stop();
-        SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
 
         // SPEC §8：浮窗关闭时必须停止朗读，否则关了窗还在念。
         if (_speechService is not null)
@@ -243,7 +241,7 @@ public partial class PopupWindow : Window
 
     private void OnLoadingTick(object? sender, EventArgs e)
     {
-        LoadingText.Text = $"翻译中…（已等待 {_stopwatch.Elapsed.TotalSeconds:F1} 秒）";
+        LoadingText.Text = $"翻译中… {_stopwatch.Elapsed.TotalSeconds:F1}s";
     }
 
     private void MouseHook_OnClickedOutside(object? sender, OutsideClickEventArgs e)
@@ -499,15 +497,19 @@ public partial class PopupWindow : Window
             var paragraph = new Paragraph { Margin = new Thickness(0, index == 0 ? 0 : 4, 0, 0) };
             if (index == 0 && line.StartsWith('/') && line.EndsWith('/'))
             {
-                paragraph.FontFamily = new FontFamily("Consolas");
-                paragraph.Foreground = SecondaryBrush();
+                paragraph.SetResourceReference(TextElement.FontFamilyProperty, "Font.Mono");
+                paragraph.SetResourceReference(TextElement.ForegroundProperty, "Brush.TextSecondary");
+                paragraph.SetResourceReference(TextElement.FontSizeProperty, "Size.BodySmall");
                 paragraph.Inlines.Add(new Run(line));
             }
             else if (line.StartsWith("例", StringComparison.Ordinal))
             {
-                paragraph.Margin = new Thickness(12, 6, 0, 0);
-                paragraph.FontStyle = FontStyles.Italic;
-                paragraph.Foreground = SecondaryBrush();
+                paragraph.Margin = new Thickness(0, 8, 0, 0);
+                paragraph.Padding = new Thickness(8, 0, 0, 0);
+                paragraph.BorderThickness = new Thickness(2, 0, 0, 0);
+                paragraph.SetResourceReference(Block.BorderBrushProperty, "Brush.BorderStrong");
+                paragraph.SetResourceReference(TextElement.ForegroundProperty, "Brush.TextSecondary");
+                paragraph.SetResourceReference(TextElement.FontSizeProperty, "Size.BodySmall");
                 paragraph.Inlines.Add(new Run(line));
             }
             else
@@ -515,7 +517,9 @@ public partial class PopupWindow : Window
                 int separator = line.IndexOfAny(['.', '．', '。']);
                 if (separator is > 0 and < 8)
                 {
-                    paragraph.Inlines.Add(new Run(line[..(separator + 1)]) { FontWeight = FontWeights.Bold });
+                    var partOfSpeech = new Run(line[..(separator + 1)]) { FontWeight = FontWeights.SemiBold };
+                    partOfSpeech.SetResourceReference(TextElement.ForegroundProperty, "Brush.Accent");
+                    paragraph.Inlines.Add(partOfSpeech);
                     paragraph.Inlines.Add(new Run(line[(separator + 1)..]));
                 }
                 else
@@ -533,29 +537,46 @@ public partial class PopupWindow : Window
     private void RenderErrorText(string message)
     {
         var document = CreateDocument();
-        document.Blocks.Add(new Paragraph(new Run($"❌ {message}"))
+        var icon = new System.Windows.Shapes.Path
         {
-            Foreground = new SolidColorBrush(Color.FromRgb(190, 45, 45)),
-            Margin = new Thickness(0)
-        });
+            Width = 14,
+            Height = 14,
+            Stretch = Stretch.Uniform,
+            StrokeThickness = 1.5,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
+            Margin = new Thickness(0, 0, 6, -2)
+        };
+        icon.SetResourceReference(System.Windows.Shapes.Path.DataProperty, "Icon.Error");
+        icon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "Brush.Danger");
+
+        var paragraph = new Paragraph { Margin = new Thickness(0) };
+        paragraph.SetResourceReference(TextElement.ForegroundProperty, "Brush.Danger");
+        paragraph.Inlines.Add(new InlineUIContainer(icon) { BaselineAlignment = BaselineAlignment.Center });
+        paragraph.Inlines.Add(new Run(message));
+        document.Blocks.Add(paragraph);
         ContentViewer.Document = document;
     }
 
     private FlowDocument CreateDocument()
     {
-        return new FlowDocument
+        double fontSize = Math.Clamp(_settings.PopupFontSize, 10, 24);
+        var document = new FlowDocument
         {
             PagePadding = new Thickness(0),
-            FontFamily = new FontFamily("Microsoft YaHei UI"),
-            FontSize = Math.Clamp(_settings.PopupFontSize, 10, 24),
-            Foreground = ContentViewer.Foreground
+            FontSize = fontSize,
+            LineHeight = fontSize * 1.6
         };
+        document.SetResourceReference(TextElement.FontFamilyProperty, "Font.Ui");
+        document.SetResourceReference(TextElement.ForegroundProperty, "Brush.Text");
+        return document;
     }
 
     private void ShowReasoningWarning(string model)
     {
         ShowNotice(
-            $"⚠️ 你配置的模型「{model}」正在“思考”，这会让翻译慢很多、也更费钱。",
+            $"你配置的模型「{model}」正在“思考”，这会让翻译慢很多、也更费钱。",
             ErrorAction.Settings,
             "去设置",
             isWarning: true);
@@ -570,10 +591,18 @@ public partial class PopupWindow : Window
     {
         _noticeAction = action;
         NoticeText.Text = message;
-        NoticeBorder.Background = isWarning
-            ? new SolidColorBrush(Color.FromRgb(255, 244, 190))
-            : new SolidColorBrush(Color.FromRgb(255, 224, 224));
-        NoticeText.Foreground = new SolidColorBrush(Color.FromRgb(65, 45, 20));
+        NoticeBorder.SetResourceReference(
+            System.Windows.Controls.Border.BackgroundProperty,
+            isWarning ? "Brush.WarningBg" : "Brush.DangerBg");
+        NoticeText.SetResourceReference(
+            TextElement.ForegroundProperty,
+            isWarning ? "Brush.Warning" : "Brush.Danger");
+        NoticeIcon.SetResourceReference(
+            System.Windows.Shapes.Path.DataProperty,
+            isWarning ? "Icon.Warning" : "Icon.Error");
+        NoticeIcon.SetResourceReference(
+            System.Windows.Shapes.Shape.StrokeProperty,
+            isWarning ? "Brush.Warning" : "Brush.Danger");
         NoticeActionButton.Content = actionText;
         NoticeActionButton.Visibility = action == ErrorAction.None
             ? Visibility.Collapsed
@@ -585,84 +614,6 @@ public partial class PopupWindow : Window
         }
 
         NoticeBorder.Visibility = Visibility.Visible;
-    }
-
-    /// <summary>
-    /// 系统偏好变化（含深浅色切换）时重新上色。回调在别的线程，必须切回 UI 线程。
-    /// </summary>
-    private void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
-    {
-        if (e.Category is not (UserPreferenceCategory.General or UserPreferenceCategory.Color))
-        {
-            return;
-        }
-
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            if (_isClosed)
-            {
-                return;
-            }
-
-            try
-            {
-                ApplyTheme();
-            }
-            catch (Exception exception)
-            {
-                Logger.Error("浮窗", "系统主题变化时重新上色失败。", exception);
-            }
-        }));
-    }
-
-    private void ApplyTheme()
-    {
-        bool dark = IsDarkTheme();
-        ShellBorder.Background = new SolidColorBrush(dark
-            ? Color.FromRgb(35, 37, 41)
-            : Color.FromRgb(255, 255, 255));
-        ShellBorder.BorderBrush = new SolidColorBrush(dark
-            ? Color.FromRgb(75, 78, 84)
-            : Color.FromRgb(210, 213, 218));
-        Foreground = new SolidColorBrush(dark
-            ? Color.FromRgb(239, 239, 239)
-            : Color.FromRgb(32, 34, 38));
-        ContentViewer.Foreground = Foreground;
-        LoadingText.Foreground = Foreground;
-    }
-
-    private bool IsDarkTheme()
-    {
-        if (string.Equals(_settings.Theme, "Dark", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(_settings.Theme, "深色", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        if (string.Equals(_settings.Theme, "Light", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(_settings.Theme, "浅色", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        try
-        {
-            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(
-                @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-            return key?.GetValue("AppsUseLightTheme") is int value && value == 0;
-        }
-        catch (Exception exception)
-        {
-            Logger.Error("浮窗", "读取 Windows 主题失败，使用浅色主题。", exception);
-            return false;
-        }
-    }
-
-    private System.Windows.Media.Brush SecondaryBrush()
-    {
-        return new SolidColorBrush(IsDarkTheme()
-            ? Color.FromRgb(180, 184, 190)
-            : Color.FromRgb(100, 105, 112));
     }
 
     private void RepositionAndRefreshBounds()

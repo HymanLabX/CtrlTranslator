@@ -27,7 +27,7 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <TextBlock x:Name="StatusText" VerticalAlignment="Center" Foreground="#276A36"
+            <TextBlock x:Name="StatusText" VerticalAlignment="Center" Foreground="{DynamicResource Brush.Success}"
                        Text="设置修改后会自动保存并立即生效。" />
             <Button Grid.Column="1" Width="88" Height="30" Content="关闭" IsCancel="True"
                     Click="CloseButton_OnClick" />
@@ -105,7 +105,7 @@
                             <TextBlock VerticalAlignment="Center" Text="首字" />
                             <TextBox x:Name="FirstTokenTimeoutBox" Width="64" Margin="8,0,10,0"
                                      LostKeyboardFocus="EditableControl_OnLostKeyboardFocus" />
-                            <TextBlock VerticalAlignment="Center" Foreground="#666"
+                            <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextSecondary}"
                                        Text="首字超时必须小于整体超时" />
                         </WrapPanel>
 
@@ -117,7 +117,7 @@
                                  LostKeyboardFocus="EditableControl_OnLostKeyboardFocus" />
 
                         <TextBlock Grid.Row="8" Grid.Column="1" x:Name="ExtraRequestBodyError"
-                                   Foreground="#B3261E" Visibility="Collapsed"
+                                   Foreground="{DynamicResource Brush.Danger}" Visibility="Collapsed"
                                    Text="这段不是合法的 JSON，已忽略" />
 
                         <WrapPanel Grid.Row="9" Grid.Column="1" Margin="0,5,0,5">
@@ -131,7 +131,7 @@
                                     Tag="clear" Click="ExtraPresetButton_OnClick" />
                         </WrapPanel>
 
-                        <TextBlock Grid.Row="10" Grid.Column="1" Foreground="#666" TextWrapping="Wrap"
+                        <TextBlock Grid.Row="10" Grid.Column="1" Foreground="{DynamicResource Brush.TextSecondary}" TextWrapping="Wrap"
                                    Text="大多数模型默认会先『思考』再回答，这让划词翻译又慢又贵。保持默认值即可；换了服务商发现变慢，就点对应的预设按钮。" />
 
                         <Button Grid.Row="11" Grid.Column="1" HorizontalAlignment="Left"
@@ -229,13 +229,13 @@
                         <CheckBox x:Name="EnabledCheckBox" Grid.Row="5" Grid.Column="1" Margin="0,8,0,8"
                                   Content="双击触发键后翻译选中文字" Click="GeneralCheckBox_OnClick" />
 
-                        <Border Grid.Row="6" Grid.ColumnSpan="2" BorderBrush="#8A8A8A" BorderThickness="1"
-                                CornerRadius="6" Padding="18" Margin="0,18,0,0" Background="#F6F7F8">
+                        <Border Grid.Row="6" Grid.ColumnSpan="2" BorderBrush="{DynamicResource Brush.BorderStrong}" BorderThickness="1"
+                                CornerRadius="6" Padding="18" Margin="0,18,0,0" Background="{DynamicResource Brush.SurfaceSubtle}">
                             <StackPanel>
                                 <TextBlock FontWeight="SemiBold" Text="实时双击测试" />
                                 <TextBlock x:Name="DoubleTapTestText" Margin="0,12,0,0" FontSize="18"
                                            Text="在这里双击触发键试试" />
-                                <TextBlock Margin="0,8,0,0" Foreground="#666" TextWrapping="Wrap"
+                                <TextBlock Margin="0,8,0,0" Foreground="{DynamicResource Brush.TextSecondary}" TextWrapping="Wrap"
                                            Text="每次有效敲击会显示一个圆点；识别到双击后会显示成功标记。修改触发键或间隔后，测试立即使用新设置。" />
                             </StackPanel>
                         </Border>
@@ -274,7 +274,7 @@
                         <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,5,0,5">
                             <TextBox x:Name="LongTextThresholdBox" Width="100"
                                      LostKeyboardFocus="EditableControl_OnLostKeyboardFocus" />
-                            <TextBlock Margin="10,0,0,0" VerticalAlignment="Center" Foreground="#666"
+                            <TextBlock Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextSecondary}"
                                        Text="字符，0 表示不确认" />
                         </StackPanel>
                         <TextBlock Grid.Row="3" Style="{StaticResource FieldLabel}" Text="隐私模式" />
@@ -289,7 +289,7 @@
                                     Click="ClearAllHistoryButton_OnClick" />
                             <Button Padding="12,4" Content="清空缓存" Click="ClearCacheButton_OnClick" />
                         </WrapPanel>
-                        <TextBlock Grid.Row="6" Grid.Column="1" Foreground="#666" TextWrapping="Wrap"
+                        <TextBlock Grid.Row="6" Grid.Column="1" Foreground="{DynamicResource Brush.TextSecondary}" TextWrapping="Wrap"
                                    Text="⭐ 收藏的内容不会被删除。两个按钮都只清除未收藏的记录，你攒下的生词本一条都不会少。若要删除某条收藏，请到主窗口里逐条右键删除。" />
                     </Grid>
                 </ScrollViewer>
@@ -345,7 +345,7 @@
                                     Click="ExportHistoryButton_OnClick" />
                         </WrapPanel>
                         <TextBlock Grid.Row="8" Grid.ColumnSpan="2" Margin="0,18,0,0" Padding="12"
-                                   Background="#F3F4F5" TextWrapping="Wrap"
+                                   Background="{DynamicResource Brush.SurfaceSubtle}" TextWrapping="Wrap"
                                    Text="CtrlTranslator v1.0&#x0a;&#x0a;已知限制：普通权限运行时，无法在管理员权限程序中划词；全局键盘钩子和剪贴板读取也可能被安全软件误报。遇到这些情况，请以管理员身份运行或把程序加入安全软件白名单。" />
                     </Grid>
                 </ScrollViewer>

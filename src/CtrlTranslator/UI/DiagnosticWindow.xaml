@@ -11,16 +11,16 @@
         </Grid.RowDefinitions>
         <StackPanel>
             <TextBlock FontSize="22" FontWeight="SemiBold" Text="一键诊断"/>
-            <TextBlock x:Name="SummaryText" Margin="0,7,0,14" Foreground="#666"
+            <TextBlock x:Name="SummaryText" Margin="0,7,0,14" Foreground="{DynamicResource Brush.TextSecondary}"
                        Text="正在逐项检查，请稍候…"/>
         </StackPanel>
 
-        <Border Grid.Row="1" BorderBrush="#DDD" BorderThickness="1" CornerRadius="6">
+        <Border Grid.Row="1" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1" CornerRadius="6">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <ItemsControl x:Name="ResultsList" Margin="8">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border Padding="10" BorderBrush="#EEE" BorderThickness="0,0,0,1">
+                            <Border Padding="10" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="38"/>
@@ -32,7 +32,7 @@
                                     <TextBlock Grid.Column="1" VerticalAlignment="Center" FontWeight="SemiBold" Text="{Binding Name}"/>
                                     <TextBlock Grid.Column="2" VerticalAlignment="Center" TextWrapping="Wrap" Text="{Binding Detail}"/>
                                     <TextBlock Grid.Column="3" VerticalAlignment="Center" HorizontalAlignment="Right"
-                                               Foreground="#777" Text="{Binding DurationMilliseconds, StringFormat={}{0} ms}"/>
+                                               Foreground="{DynamicResource Brush.TextTertiary}" Text="{Binding DurationMilliseconds, StringFormat={}{0} ms}"/>
                                 </Grid>
                             </Border>
                         </DataTemplate>
