@@ -8,6 +8,7 @@ using CtrlTranslator.Data;
 using CtrlTranslator.Diagnostics;
 using CtrlTranslator.Interop;
 using CtrlTranslator.Settings;
+using CtrlTranslator.Speech;
 using CtrlTranslator.UI;
 using CtrlTranslator.Translation;
 
@@ -40,6 +41,7 @@ public partial class App : System.Windows.Application
     private MainWindow? _mainWindow;
     private DiagnosticWindow? _diagnosticWindow;
     private OnboardingWindow? _onboardingWindow;
+    private SpeechService? _speechService;
     private bool _loggerInitialized;
     private int _unhandledExceptionReported;
 
@@ -70,6 +72,9 @@ public partial class App : System.Windows.Application
             AppSettings settings = settingsStore.LoadOrCreate();
             _settings = settings;
             Logger.SetApiKey(settings.ApiKey);
+
+            // 朗读服务是全局单例，构造时会枚举 SAPI 语音；无语音时它自己降级，不影响启动。
+            _speechService = new SpeechService();
 
             _trayIcon = new TrayIconController(settings, settingsStore);
             _trayIcon.SettingsRequested += TrayIcon_OnSettingsRequested;
@@ -166,6 +171,16 @@ public partial class App : System.Windows.Application
         catch (Exception exception)
         {
             Logger.Error("应用", "移除托盘图标失败。", exception);
+        }
+
+        try
+        {
+            _speechService?.Dispose();
+            _speechService = null;
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("应用", "释放朗读服务失败。", exception);
         }
 
         try
@@ -475,7 +490,7 @@ public partial class App : System.Windows.Application
             oldPopup.Close();
         }
 
-        var popup = new PopupWindow(text, appName, _settings ?? new AppSettings());
+        var popup = new PopupWindow(text, appName, _settings ?? new AppSettings(), _speechService);
         popup.ClosingRequested += Popup_OnClosingRequested;
         popup.ActionRequested += Popup_OnActionRequested;
         popup.StarredChanged += Popup_OnStarredChanged;
@@ -709,8 +724,35 @@ public partial class App : System.Windows.Application
     {
         try
         {
+            string version = System.Reflection.Assembly
+                .GetExecutingAssembly()
+                .GetName()
+                .Version?
+                .ToString(3) ?? "1.0.0";
+
             System.Windows.MessageBox.Show(
-                "CtrlTranslator v1.0\n\n在任意程序中选中文字，快速双击 Ctrl 即可翻译。\nAPI Key 加密保存在本机，翻译内容默认不会写入日志。",
+                $"CtrlTranslator v{version}\n"
+                + "\n"
+                + "在任意程序中选中文字，快速双击 Ctrl 即可翻译。\n"
+                + "API Key 用 Windows 账户加密保存在本机，翻译原文默认不写入日志。\n"
+                + "\n"
+                + "── 已知限制 ──\n"
+                + "\n"
+                + "1. 管理员权限的程序里划不了词\n"
+                + "   Windows 的 UIPI 机制不允许普通权限程序接收高权限程序的按键，\n"
+                + "   任务管理器、部分安装程序里双击 Ctrl 不会有反应。\n"
+                + "   需要的话可以用管理员身份运行本程序，但开机自启会失效。\n"
+                + "\n"
+                + "2. 杀毒软件可能误报\n"
+                + "   全局键盘钩子 + 模拟按键 + 读剪贴板是键盘记录器的典型特征。\n"
+                + "   被拦截时请到杀毒软件的信任区/排除项里添加本程序。\n"
+                + "\n"
+                + "3. 剪贴板里的图片会丢\n"
+                + "   取词后会还原你原来的剪贴板，但 v1.0 只能还原文字。\n"
+                + "   刚截图还没粘贴时，请先粘贴完再划词。\n"
+                + "\n"
+                + "更多说明见程序目录下的 README.md。\n"
+                + "遇到问题请先用「设置 → 翻译服务 → 一键诊断」自查。",
                 "关于 CtrlTranslator",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);

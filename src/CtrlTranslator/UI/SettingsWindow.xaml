@@ -285,12 +285,12 @@
                                   Content="在日志中记录选中的原文（可能包含隐私内容）" Click="GeneralCheckBox_OnClick" />
                         <TextBlock Grid.Row="5" Style="{StaticResource FieldLabel}" Text="历史数据" />
                         <WrapPanel Grid.Row="5" Grid.Column="1" Margin="0,8,0,8">
-                            <Button Padding="12,4" Margin="0,0,8,0" Content="清空所有历史"
+                            <Button Padding="12,4" Margin="0,0,8,0" Content="清空历史记录"
                                     Click="ClearAllHistoryButton_OnClick" />
                             <Button Padding="12,4" Content="清空缓存" Click="ClearCacheButton_OnClick" />
                         </WrapPanel>
                         <TextBlock Grid.Row="6" Grid.Column="1" Foreground="#666" TextWrapping="Wrap"
-                                   Text="清空缓存会删除未收藏的历史记录；已经收藏的内容会保留。" />
+                                   Text="⭐ 收藏的内容不会被删除。两个按钮都只清除未收藏的记录，你攒下的生词本一条都不会少。若要删除某条收藏，请到主窗口里逐条右键删除。" />
                     </Grid>
                 </ScrollViewer>
             </TabItem>
