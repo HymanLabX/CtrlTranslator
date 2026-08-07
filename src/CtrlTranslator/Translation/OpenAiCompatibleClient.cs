@@ -166,6 +166,43 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
         }
     }
 
+    internal static async Task<IReadOnlyList<string>> FetchModelsAsync(
+        string baseUrl,
+        string apiKey,
+        CancellationToken cancellationToken)
+    {
+        using var message = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{baseUrl.TrimEnd('/')}/models");
+        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        using HttpResponseMessage response = await SharedHttpClient.SendAsync(
+            message,
+            HttpCompletionOption.ResponseContentRead,
+            cancellationToken);
+        string responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new ApiHttpException(response.StatusCode, responseBody);
+        }
+
+        using JsonDocument document = JsonDocument.Parse(responseBody);
+        if (!document.RootElement.TryGetProperty("data", out JsonElement data)
+            || data.ValueKind != JsonValueKind.Array)
+        {
+            throw new TranslationJsonException();
+        }
+
+        return data.EnumerateArray()
+            .Where(item => item.TryGetProperty("id", out JsonElement id)
+                && id.ValueKind == JsonValueKind.String)
+            .Select(item => item.GetProperty("id").GetString())
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     public void Dispose()
     {
         if (_disposed)

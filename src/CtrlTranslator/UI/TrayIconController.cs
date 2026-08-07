@@ -25,6 +25,7 @@ public sealed class TrayIconController : IDisposable
     private readonly Forms.ToolStripMenuItem _enabledItem;
     private readonly Forms.ToolStripMenuItem _thinkingDisabledItem;
     private readonly Forms.ToolStripMenuItem _privacyItem;
+    private readonly Forms.ToolStripMenuItem _modesItem;
     private readonly List<Forms.ToolStripMenuItem> _modeItems = [];
     private bool _disposed;
 
@@ -37,24 +38,12 @@ public sealed class TrayIconController : IDisposable
 
         _menu = new Forms.ContextMenuStrip();
         _menu.Items.Add(CreateActionItem("打开主窗口", ShowLaterMessage));
-        _menu.Items.Add(CreateActionItem("设置…", ShowLaterMessage));
-        _menu.Items.Add(CreateActionItem("填写 API Key…", () => OpenTemporaryApiSettings()));
+        _menu.Items.Add(CreateActionItem("设置…", RaiseSettingsRequested));
         _menu.Items.Add(new Forms.ToolStripSeparator());
 
-        Forms.ToolStripMenuItem modesItem = new("翻译模式");
-        foreach (TranslationMode mode in _settings.Modes)
-        {
-            Forms.ToolStripMenuItem item = new(mode.Name)
-            {
-                Tag = mode.Id,
-                Checked = string.Equals(mode.Id, _settings.CurrentModeId, StringComparison.Ordinal)
-            };
-            item.Click += (_, _) => ExecuteSafely("切换翻译模式", () => SelectMode(mode.Id));
-            _modeItems.Add(item);
-            modesItem.DropDownItems.Add(item);
-        }
-
-        _menu.Items.Add(modesItem);
+        _modesItem = new Forms.ToolStripMenuItem("翻译模式");
+        RebuildModeItems();
+        _menu.Items.Add(_modesItem);
         _menu.Items.Add(new Forms.ToolStripSeparator());
 
         _enabledItem = new Forms.ToolStripMenuItem("启用划词")
@@ -100,6 +89,8 @@ public sealed class TrayIconController : IDisposable
         RefreshVisualState();
     }
 
+    public event EventHandler? SettingsRequested;
+
     public void ShowInformation(string title, string message)
     {
         _notifyIcon.BalloonTipTitle = title;
@@ -116,16 +107,13 @@ public sealed class TrayIconController : IDisposable
         _notifyIcon.ShowBalloonTip(5000);
     }
 
-    public bool OpenTemporaryApiSettings()
+    public void RefreshFromSettings()
     {
-        var window = new TemporaryApiSettingsWindow(_settings, _settingsStore);
-        bool saved = window.ShowDialog() == true;
-        if (saved)
-        {
-            RefreshThinkingDisabledState();
-        }
-
-        return saved;
+        _enabledItem.Checked = _settings.Enabled;
+        _privacyItem.Checked = _settings.PrivacyMode;
+        RefreshThinkingDisabledState();
+        RebuildModeItems();
+        RefreshVisualState();
     }
 
     public void OpenLogDirectory()
@@ -241,6 +229,24 @@ public sealed class TrayIconController : IDisposable
         Logger.Info("托盘", $"翻译模式已切换为 {modeId}。");
     }
 
+    private void RebuildModeItems()
+    {
+        _modesItem?.DropDownItems.Clear();
+        _modeItems.Clear();
+        foreach (TranslationMode mode in _settings.Modes)
+        {
+            string modeId = mode.Id;
+            Forms.ToolStripMenuItem item = new(mode.Name)
+            {
+                Tag = modeId,
+                Checked = string.Equals(modeId, _settings.CurrentModeId, StringComparison.Ordinal)
+            };
+            item.Click += (_, _) => ExecuteSafely("切换翻译模式", () => SelectMode(modeId));
+            _modeItems.Add(item);
+            _modesItem?.DropDownItems.Add(item);
+        }
+    }
+
     private void RefreshVisualState()
     {
         _notifyIcon.Icon = _settings.Enabled ? _enabledIcon : _pausedIcon;
@@ -251,7 +257,7 @@ public sealed class TrayIconController : IDisposable
 
     private void Menu_OnOpening(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        RefreshThinkingDisabledState();
+        RefreshFromSettings();
     }
 
     private void RefreshThinkingDisabledState()
@@ -275,6 +281,19 @@ public sealed class TrayIconController : IDisposable
             "CtrlTranslator",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
+    }
+
+    private void RaiseSettingsRequested()
+    {
+        EventHandler? handler = SettingsRequested;
+        if (handler is null)
+        {
+            Logger.Error("托盘", "用户点击设置，但设置窗口没有订阅者。");
+            ShowError("设置窗口还没有准备好，请退出程序后重新打开再试。");
+            return;
+        }
+
+        handler.Invoke(this, EventArgs.Empty);
     }
 
     private void ExecuteSafely(string actionName, Action action)

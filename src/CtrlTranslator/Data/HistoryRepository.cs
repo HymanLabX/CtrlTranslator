@@ -90,6 +90,25 @@ public sealed class HistoryRepository
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task ClearAllAsync(CancellationToken cancellationToken)
+    {
+        await ExecuteDeleteAsync("DELETE FROM translations;", cancellationToken);
+    }
+
+    public async Task ClearNonStarredAsync(CancellationToken cancellationToken)
+    {
+        await ExecuteDeleteAsync("DELETE FROM translations WHERE starred = 0;", cancellationToken);
+    }
+
+    private async Task ExecuteDeleteAsync(string commandText, CancellationToken cancellationToken)
+    {
+        await using SqliteConnection connection = _database.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = commandText;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private static void AddRecordParameters(SqliteCommand command, TranslationRecord record)
     {
         command.Parameters.AddWithValue("$cache_key", record.CacheKey);
