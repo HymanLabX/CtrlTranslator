@@ -11,6 +11,7 @@ using CtrlTranslator.Settings;
 using CtrlTranslator.Speech;
 using CtrlTranslator.UI;
 using CtrlTranslator.Translation;
+using Microsoft.Win32;
 
 namespace CtrlTranslator;
 
@@ -43,6 +44,7 @@ public partial class App : System.Windows.Application
     private OnboardingWindow? _onboardingWindow;
     private SpeechService? _speechService;
     private bool _loggerInitialized;
+    private bool _systemThemeListenerRegistered;
     private int _unhandledExceptionReported;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -72,6 +74,9 @@ public partial class App : System.Windows.Application
             AppSettings settings = settingsStore.LoadOrCreate();
             _settings = settings;
             Logger.SetApiKey(settings.ApiKey);
+            ApplyThemeResources();
+            SystemEvents.UserPreferenceChanged += SystemEvents_OnUserPreferenceChanged;
+            _systemThemeListenerRegistered = true;
 
             // 朗读服务是全局单例，构造时会枚举 SAPI 语音；无语音时它自己降级，不影响启动。
             _speechService = new SpeechService();
@@ -130,6 +135,11 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         UnregisterGlobalExceptionHandlers();
+        if (_systemThemeListenerRegistered)
+        {
+            SystemEvents.UserPreferenceChanged -= SystemEvents_OnUserPreferenceChanged;
+            _systemThemeListenerRegistered = false;
+        }
 
         try
         {
@@ -966,6 +976,7 @@ public partial class App : System.Windows.Application
 
     private void OnSettingsChanged(SettingsChangeKind changeKind)
     {
+        ApplyThemeResources();
         _appState?.RefreshBlacklist();
         _trayIcon?.RefreshFromSettings();
         if (changeKind == SettingsChangeKind.KeyboardHook)
@@ -1045,6 +1056,88 @@ public partial class App : System.Windows.Application
     private bool IsThinkingDisabled()
     {
         return ExtraRequestBodyHelper.IsThinkingDisabled(_settings?.ExtraRequestBody);
+    }
+
+    /// <summary>
+    /// 系统主题变化由应用统一处理，替换令牌字典后所有 DynamicResource 会立即刷新。
+    /// </summary>
+    private void SystemEvents_OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
+    {
+        if (e.Category is not (UserPreferenceCategory.General or UserPreferenceCategory.Color))
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            try
+            {
+                ApplyThemeResources();
+            }
+            catch (Exception exception)
+            {
+                Logger.Error("主题", "Windows 主题变化后更新界面失败。", exception);
+            }
+        }));
+    }
+
+    private void ApplyThemeResources()
+    {
+        bool useDarkTheme = ShouldUseDarkTheme(_settings?.Theme);
+        string themeName = useDarkTheme ? "Dark" : "Light";
+        ResourceDictionary dictionaries = Resources;
+        ResourceDictionary? currentTokens = dictionaries.MergedDictionaries.FirstOrDefault(
+            dictionary => dictionary.Source?.OriginalString.Contains("Themes/Tokens.", StringComparison.OrdinalIgnoreCase) == true);
+        string desiredSource = $"Themes/Tokens.{themeName}.xaml";
+        if (currentTokens?.Source?.OriginalString.EndsWith(
+                $"Tokens.{themeName}.xaml",
+                StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return;
+        }
+
+        var replacement = new ResourceDictionary
+        {
+            Source = new Uri(desiredSource, UriKind.Relative)
+        };
+        if (currentTokens is null)
+        {
+            dictionaries.MergedDictionaries.Insert(0, replacement);
+        }
+        else
+        {
+            int index = dictionaries.MergedDictionaries.IndexOf(currentTokens);
+            dictionaries.MergedDictionaries[index] = replacement;
+        }
+
+        Logger.Info("主题", $"界面主题已切换为{(useDarkTheme ? "深色" : "浅色")}。" );
+    }
+
+    private static bool ShouldUseDarkTheme(string? configuredTheme)
+    {
+        if (string.Equals(configuredTheme, "Dark", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(configuredTheme, "深色", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (string.Equals(configuredTheme, "Light", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(configuredTheme, "浅色", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            return key?.GetValue("AppsUseLightTheme") is int value && value == 0;
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("主题", "读取 Windows 主题失败，使用浅色主题。", exception);
+            return false;
+        }
     }
 
     private static void TryLogStartupFailure(Exception exception)

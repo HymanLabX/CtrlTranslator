@@ -15,12 +15,9 @@ using CtrlTranslator.Translation;
 using Button = System.Windows.Controls.Button;
 using ComboBox = System.Windows.Controls.ComboBox;
 using ComboBoxItem = System.Windows.Controls.ComboBoxItem;
-using Brushes = System.Windows.Media.Brushes;
-using Color = System.Windows.Media.Color;
 using FontFamily = System.Windows.Media.FontFamily;
 using HorizontalAlignment = System.Windows.HorizontalAlignment;
 using Orientation = System.Windows.Controls.Orientation;
-using SystemColors = System.Windows.SystemColors;
 using TextBox = System.Windows.Controls.TextBox;
 
 namespace CtrlTranslator.UI;
@@ -104,7 +101,9 @@ public partial class SettingsWindow : Window
 
         _testTapCount = Math.Min(2, _testTapCount + 1);
         DoubleTapTestText.Text = string.Join(' ', Enumerable.Repeat("●", _testTapCount));
-        DoubleTapTestText.Foreground = Brushes.DimGray;
+        DoubleTapTestText.SetResourceReference(
+            System.Windows.Controls.TextBlock.ForegroundProperty,
+            "Brush.TextSecondary");
     }
 
     internal void RecordDoubleTap()
@@ -116,7 +115,9 @@ public partial class SettingsWindow : Window
 
         _testTapCount = 0;
         DoubleTapTestText.Text = "✓ 双击已识别";
-        DoubleTapTestText.Foreground = new SolidColorBrush(Color.FromRgb(39, 106, 54));
+        DoubleTapTestText.SetResourceReference(
+            System.Windows.Controls.TextBlock.ForegroundProperty,
+            "Brush.Success");
     }
 
     private void LoadControlsFromSettings()
@@ -227,7 +228,9 @@ public partial class SettingsWindow : Window
 
             Logger.SetApiKey(_settings.ApiKey);
             Logger.Info("设置", "设置窗口中的修改已保存并立即生效。");
-            StatusText.Foreground = new SolidColorBrush(Color.FromRgb(39, 106, 54));
+            StatusText.SetResourceReference(
+                System.Windows.Controls.TextBlock.ForegroundProperty,
+                "Brush.Success");
             StatusText.Text = "已保存，设置已立即生效。";
             _settingsChanged(changeKind);
             return true;
@@ -289,9 +292,9 @@ public partial class SettingsWindow : Window
     {
         bool valid = IsJsonObjectOrEmpty(ExtraRequestBodyBox.Text);
         ExtraRequestBodyError.Visibility = valid ? Visibility.Collapsed : Visibility.Visible;
-        ExtraRequestBodyBox.BorderBrush = valid
-            ? SystemColors.ControlDarkBrush
-            : new SolidColorBrush(Color.FromRgb(179, 38, 30));
+        ExtraRequestBodyBox.SetResourceReference(
+            System.Windows.Controls.Control.BorderBrushProperty,
+            valid ? "Brush.BorderStrong" : "Brush.Danger");
         ExtraRequestBodyBox.BorderThickness = valid ? new Thickness(1) : new Thickness(2);
     }
 
@@ -339,7 +342,9 @@ public partial class SettingsWindow : Window
     {
         _testTapCount = 0;
         DoubleTapTestText.Text = "在这里双击触发键试试";
-        DoubleTapTestText.Foreground = Brushes.Black;
+        DoubleTapTestText.SetResourceReference(
+            System.Windows.Controls.TextBlock.ForegroundProperty,
+            "Brush.Text");
     }
 
     private bool TryReadInt(TextBox box, string fieldName, int minimum, int maximum, out int value)
@@ -382,7 +387,9 @@ public partial class SettingsWindow : Window
 
     private void ShowValidationError(string message)
     {
-        StatusText.Foreground = new SolidColorBrush(Color.FromRgb(179, 38, 30));
+        StatusText.SetResourceReference(
+            System.Windows.Controls.TextBlock.ForegroundProperty,
+            "Brush.Danger");
         StatusText.Text = message;
     }
 
@@ -988,9 +995,11 @@ internal sealed class ModeEditorWindow : Window
         var hint = new TextBlock
         {
             Text = "可用占位符：{target_lang}  {fallback_lang}",
-            Foreground = Brushes.DimGray,
             Margin = new Thickness(0, 0, 0, 12)
         };
+        hint.SetResourceReference(
+            System.Windows.Controls.TextBlock.ForegroundProperty,
+            "Brush.TextSecondary");
         Grid.SetRow(hint, 3);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var saveButton = new Button { Content = "保存", Width = 88, IsDefault = true };

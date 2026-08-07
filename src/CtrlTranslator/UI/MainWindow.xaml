@@ -16,7 +16,7 @@
             <TextBox x:Name="SearchBox" Width="340" Height="34" Padding="9,6"
                      HorizontalAlignment="Left" ToolTip="搜索原文或译文"
                      TextChanged="SearchBox_OnTextChanged"/>
-            <TextBlock Margin="12,8,0,0" Foreground="#666" Text="输入关键词搜索原文和译文"/>
+            <TextBlock Margin="12,8,0,0" Foreground="{DynamicResource Brush.TextSecondary}" Text="输入关键词搜索原文和译文"/>
         </DockPanel>
 
         <TabControl x:Name="HistoryTabs" Grid.Row="1" SelectionChanged="HistoryTabs_OnSelectionChanged">
@@ -47,7 +47,7 @@
             </DataGrid.Columns>
         </DataGrid>
 
-        <Border Grid.Row="2" Margin="0,14,0,0" Padding="14" BorderBrush="#DDD" BorderThickness="1" CornerRadius="6">
+        <Border Grid.Row="2" Margin="0,14,0,0" Padding="14" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1" CornerRadius="6">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -65,7 +65,7 @@
                 <TextBlock Grid.Column="2" FontWeight="SemiBold" Text="译文"/>
                 <TextBox x:Name="ResultDetail" Grid.Column="2" Grid.Row="1" Margin="0,7,0,8" IsReadOnly="True"
                          TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
-                <TextBlock x:Name="MetadataText" Grid.Row="2" Grid.ColumnSpan="3" Foreground="#666"/>
+                <TextBlock x:Name="MetadataText" Grid.Row="2" Grid.ColumnSpan="3" Foreground="{DynamicResource Brush.TextSecondary}"/>
             </Grid>
         </Border>
     </Grid>

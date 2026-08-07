@@ -10,14 +10,14 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <DockPanel>
-            <TextBlock x:Name="StepText" DockPanel.Dock="Right" Foreground="#777" Text="第 1 / 4 步"/>
+            <TextBlock x:Name="StepText" DockPanel.Dock="Right" Foreground="{DynamicResource Brush.TextTertiary}" Text="第 1 / 4 步"/>
             <TextBlock FontSize="22" FontWeight="SemiBold" Text="CtrlTranslator 初次设置"/>
         </DockPanel>
 
         <Grid Grid.Row="1" Margin="0,24,0,18">
             <StackPanel x:Name="WelcomePage" VerticalAlignment="Center" HorizontalAlignment="Center" Width="600">
                 <TextBlock FontSize="30" FontWeight="SemiBold" TextAlignment="Center" Text="选中文字，双击 Ctrl，马上翻译"/>
-                <Border Margin="70,30" Padding="28" Background="#F2F6FF" CornerRadius="12">
+                <Border Margin="70,30" Padding="28" Background="{DynamicResource Brush.AccentSubtle}" CornerRadius="12">
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                         <TextBlock FontSize="24" Text="选中文字"/>
                         <TextBlock Margin="20,0" FontSize="24" Text="→"/>
@@ -47,14 +47,14 @@
                                     <ColumnDefinition Width="100"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock FontWeight="SemiBold" Text="{Binding Name}"/>
-                                <TextBlock Grid.Column="1" Margin="10,0" Foreground="#555" Text="{Binding Description}"/>
+                                <TextBlock Grid.Column="1" Margin="10,0" Foreground="{DynamicResource Brush.TextSecondary}" Text="{Binding Description}"/>
                                 <Button Grid.Column="2" Padding="7,3" Content="去申请 Key" Tag="{Binding KeyUrl}"
                                         Visibility="{Binding KeyButtonVisibility}" Click="OpenProviderWebsite_OnClick"/>
                             </Grid>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
-                <TextBlock Grid.Row="2" Padding="10" Background="#FFF7E6" TextWrapping="Wrap"
+                <TextBlock Grid.Row="2" Padding="10" Background="{DynamicResource Brush.WarningBg}" Foreground="{DynamicResource Brush.Warning}" TextWrapping="Wrap"
                            Text="如果连接失败，请到服务商官网核对最新的接口地址和模型名。"/>
             </Grid>
 
@@ -70,19 +70,19 @@
                             Click="FetchModelsButton_OnClick"/>
                     <ComboBox x:Name="ModelBox" Height="34" Padding="7,4" IsEditable="True"/>
                 </DockPanel>
-                <TextBlock x:Name="CredentialsStatusText" Margin="0,14,0,0" Foreground="#666" TextWrapping="Wrap"/>
+                <TextBlock x:Name="CredentialsStatusText" Margin="0,14,0,0" Foreground="{DynamicResource Brush.TextSecondary}" TextWrapping="Wrap"/>
             </StackPanel>
 
             <StackPanel x:Name="TestPage" Visibility="Collapsed" VerticalAlignment="Center">
                 <TextBlock FontSize="20" FontWeight="SemiBold" Text="测试翻译服务"/>
-                <Border Margin="0,22" Padding="18" Background="#F6F6F6" CornerRadius="8">
+                <Border Margin="0,22" Padding="18" Background="{DynamicResource Brush.SurfaceSubtle}" CornerRadius="8">
                     <StackPanel>
                         <TextBlock FontWeight="SemiBold" Text="测试内容：Hello, world."/>
                         <TextBlock x:Name="TestStatusText" Margin="0,12,0,0" TextWrapping="Wrap" Text="准备连接…"/>
                         <TextBlock x:Name="TestResultText" Margin="0,12,0,0" FontSize="18" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
-                <TextBlock x:Name="ReadyText" FontSize="16" FontWeight="SemiBold" Foreground="#087E3D"
+                <TextBlock x:Name="ReadyText" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Success}"
                            TextWrapping="Wrap" Visibility="Collapsed"
                            Text="✅ CtrlTranslator 已就绪。在任意程序里选中文字，快速双击 Ctrl 试试。"/>
                 <StackPanel x:Name="TestFailureActions" Margin="0,16,0,0" Orientation="Horizontal" Visibility="Collapsed">
