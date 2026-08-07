@@ -46,6 +46,14 @@ internal static class ErrorMessages
 
         if (exception is FirstTokenTimeoutException firstTokenTimeout)
         {
+            if (!thinkingDisabled)
+            {
+                return new UserFacingError(
+                    $"翻译超时了（等了 {firstTokenTimeout.Seconds} 秒）。原因是你的「关闭思考模式」开关关着，模型会先思考很久再回答，而本软件的上限是 15 秒。想用思考模式的话，它基本不适合划词翻译。",
+                    ErrorAction.DisableThinking,
+                    "立即关闭思考模式");
+            }
+
             if (firstTokenTimeout.ResponseHeadersLatencyMilliseconds is long headersLatency
                 && headersLatency < 2_000)
             {
@@ -53,14 +61,6 @@ internal static class ErrorMessages
                     $"已经连上服务商了（响应只用了 {headersLatency} 毫秒），但它迟迟不返回内容。这基本是服务商自己出了状况，不是你的配置问题。可以去服务商的状态页看看，或者过一会儿再试。",
                     ErrorAction.Retry,
                     "重试");
-            }
-
-            if (!thinkingDisabled)
-            {
-                return new UserFacingError(
-                    $"翻译很慢（等了 {firstTokenTimeout.Seconds} 秒）。你的「关闭思考模式」开关是关着的，模型正在先思考再回答，这会慢很多。",
-                    ErrorAction.DisableThinking,
-                    "立即关闭思考模式");
             }
 
             return new UserFacingError(
