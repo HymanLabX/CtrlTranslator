@@ -33,16 +33,24 @@
 
 ### 2.1 颜色
 
+**中性色阶采用暖纸调**（类似电子墨水阅读器）。原因有二：
+
+1. 浮窗要浮在**纯白的 Word / PDF 文档**上，冷白底会和文档融为一体、看不见边界
+2. 主场景是长时间连续阅读，暖调减少蓝光感知，比冷灰更耐看
+
+> ⚠️ 不要用网上流传的"绿豆沙护眼色" `#C7EDCC`，它饱和度过高、会压低文字对比度，
+> 长时间读反而更累。
+
 | 令牌键 | 浅色 | 深色 | 用途 |
 |---|---|---|---|
-| `Color.Bg` | `#FFFFFF` | `#16181D` | 窗口底 |
-| `Color.Surface` | `#FFFFFF` | `#1C1F26` | 浮窗、卡片 |
-| `Color.SurfaceSubtle` | `#FAFAFA` | `#212530` | 输入框、列表交替行 |
-| `Color.Border` | `#E4E4E7` | `#2A2E37` | 常规边框、分隔线 |
-| `Color.BorderStrong` | `#D4D4D8` | `#3A3F4B` | 输入框边框、悬停边框 |
-| `Color.Text` | `#18181B` | `#ECEDEE` | 正文 |
-| `Color.TextSecondary` | `#71717A` | `#9BA1AC` | 次要说明、图标默认色 |
-| `Color.TextTertiary` | `#A1A1AA` | `#6B7280` | 占位符、禁用态 |
+| `Color.Bg` | `#F7F3EC` | `#15130F` | 窗口底（比 Surface 略深，做层次） |
+| `Color.Surface` | `#FBF8F3` | `#1B1917` | **浮窗**、卡片 |
+| `Color.SurfaceSubtle` | `#F2EDE4` | `#221F1B` | 输入框、只读区 |
+| `Color.Border` | `#E0D8CA` | `#302B25` | 常规边框、分隔线 |
+| `Color.BorderStrong` | `#CFC5B4` | `#453E35` | 输入框边框、**浮窗外框** |
+| `Color.Text` | `#1F1B16` | `#EDE7DE` | 正文（暖黑，不是纯黑） |
+| `Color.TextSecondary` | `#6E655A` | `#A79D91` | 次要说明、图标默认色 |
+| `Color.TextTertiary` | `#9A9086` | `#766D62` | 占位符、禁用态 |
 | `Color.Accent` | `#4F7DF3` | `#6C93F7` | 强调 |
 | `Color.AccentHover` | `#3D6AE0` | `#8AA9F9` | 强调悬停 |
 | `Color.AccentSubtle` | `#EFF4FE` | `#1E2739` | 强调色的浅底 |
@@ -98,10 +106,14 @@
 
 ```xml
 <DropShadowEffect BlurRadius="24" ShadowDepth="4" Direction="270"
-                  Opacity="0.10" Color="#000000" />   <!-- 浅色 -->
+                  Opacity="0.18" Color="#000000" />   <!-- 浅色 -->
 <DropShadowEffect BlurRadius="24" ShadowDepth="4" Direction="270"
-                  Opacity="0.45" Color="#000000" />   <!-- 深色 -->
+                  Opacity="0.50" Color="#000000" />   <!-- 深色 -->
 ```
+
+浮窗外框用 **1.5px** `Brush.BorderStrong`（不是 1px 的 `Brush.Border`）。
+浮窗要压在别的程序窗口上，边界必须足够明确 —— 实测 1px 淡边框在白色 Word 文档上
+几乎看不见，浮窗像是"糊"在文档里。
 
 ### 2.5 动效
 
@@ -228,7 +240,7 @@
 └──────────────────────────────────────────┘
 ```
 
-- 外壳：`Surface` 底、1px `Border` 边框、圆角 10、阴影按 §2.4
+- 外壳：`Surface` 底（暖纸色 `#FBF8F3`）、**1.5px `BorderStrong` 边框**、圆角 10、阴影按 §2.4
 - 内边距 `16`；工具条与译文之间加 1px 分隔线，上下各留 12
 - **加载态**：不要默认 `ProgressBar`。改为一行居中的 `TextSecondary` 文字
   「翻译中… 1.2s」，左侧一个 12×12 的旋转圆环（描边 1.5，270° 弧，匀速 800ms 一圈）
