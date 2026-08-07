@@ -102,7 +102,9 @@ codex login status
 
 ### 第 5 步 · git 仓库
 
-分支 `main`，`user.name = xiang`，`user.email = xiangsanfen@gmail.com`，
+分支 `main`，`user.name = xiang`，
+`user.email = 310452894+HuayouXiang@users.noreply.github.com`（GitHub 匿名邮箱，
+避免真实邮箱写进公开的提交记录），
 `.gitignore` 排除 `bin/` `obj/` `publish/` `.vs/` `*.log` `hello-test.txt`。
 
 ---
