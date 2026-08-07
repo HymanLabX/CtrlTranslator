@@ -5,6 +5,8 @@ namespace CtrlTranslator.Settings;
 /// </summary>
 public sealed class AppSettings
 {
+    public const int DefaultRequestTimeoutSeconds = 15;
+    public const int DefaultFirstTokenTimeoutSeconds = 10;
     public const string DefaultExtraRequestBody = "{\"thinking\": {\"type\": \"disabled\"}}";
 
     public string BaseUrl { get; set; } = string.Empty;
@@ -20,9 +22,9 @@ public sealed class AppSettings
 
     public int MaxTokens { get; set; } = 2048;
 
-    public int RequestTimeoutSeconds { get; set; } = 60;
+    public int RequestTimeoutSeconds { get; set; } = DefaultRequestTimeoutSeconds;
 
-    public int FirstTokenTimeoutSeconds { get; set; } = 15;
+    public int FirstTokenTimeoutSeconds { get; set; } = DefaultFirstTokenTimeoutSeconds;
 
     public string ExtraRequestBody { get; set; } = DefaultExtraRequestBody;
 
