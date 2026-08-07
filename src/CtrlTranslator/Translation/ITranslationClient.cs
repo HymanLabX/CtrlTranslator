@@ -54,9 +54,13 @@ internal sealed class ApiHttpException(
     public string ResponseBody { get; } = responseBody;
 }
 
-internal sealed class FirstTokenTimeoutException(int seconds) : TimeoutException
+internal sealed class FirstTokenTimeoutException(
+    int seconds,
+    long? responseHeadersLatencyMilliseconds) : TimeoutException
 {
     public int Seconds { get; } = seconds;
+
+    public long? ResponseHeadersLatencyMilliseconds { get; } = responseHeadersLatencyMilliseconds;
 }
 
 internal sealed class OverallTimeoutException(int seconds) : TimeoutException

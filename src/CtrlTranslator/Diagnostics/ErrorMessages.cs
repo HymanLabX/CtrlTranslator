@@ -13,14 +13,18 @@ internal enum ErrorAction
     Settings,
     Retry,
     Diagnostics,
-    OpenLog
+    OpenLog,
+    DisableThinking
 }
 
 internal sealed record UserFacingError(string Message, ErrorAction Action, string? ActionText);
 
 internal static class ErrorMessages
 {
-    public static UserFacingError FromException(Exception exception, string model)
+    public static UserFacingError FromException(
+        Exception exception,
+        string model,
+        bool thinkingDisabled)
     {
         if (exception is TranslationConfigurationException configurationException)
         {
@@ -42,8 +46,25 @@ internal static class ErrorMessages
 
         if (exception is FirstTokenTimeoutException firstTokenTimeout)
         {
+            if (firstTokenTimeout.ResponseHeadersLatencyMilliseconds is long headersLatency
+                && headersLatency < 2_000)
+            {
+                return new UserFacingError(
+                    $"已经连上服务商了（响应只用了 {headersLatency} 毫秒），但它迟迟不返回内容。这基本是服务商自己出了状况，不是你的配置问题。可以去服务商的状态页看看，或者过一会儿再试。",
+                    ErrorAction.Retry,
+                    "重试");
+            }
+
+            if (!thinkingDisabled)
+            {
+                return new UserFacingError(
+                    $"翻译很慢（等了 {firstTokenTimeout.Seconds} 秒）。你的「关闭思考模式」开关是关着的，模型正在先思考再回答，这会慢很多。",
+                    ErrorAction.DisableThinking,
+                    "立即关闭思考模式");
+            }
+
             return new UserFacingError(
-                $"等了 {firstTokenTimeout.Seconds} 秒还没有任何回应。可能网络很慢，也可能你填的是「推理模型」——那种模型会先思考很久，不适合用来划词翻译。",
+                $"等了 {firstTokenTimeout.Seconds} 秒还没有任何回应。可能网络很慢，也可能你填的模型不适合划词翻译。",
                 ErrorAction.Diagnostics,
                 "一键诊断");
         }
@@ -51,7 +72,7 @@ internal static class ErrorMessages
         if (exception is OverallTimeoutException overallTimeout)
         {
             return new UserFacingError(
-                $"翻译超时（{overallTimeout.Seconds} 秒）。文本可能太长，或者网络不稳定。",
+                $"翻译超时（{overallTimeout.Seconds} 秒）。文本可能太长，或者服务商这会儿很慢。",
                 ErrorAction.Retry,
                 "重试");
         }

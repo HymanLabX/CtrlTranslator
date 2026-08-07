@@ -24,7 +24,8 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <Grid x:Name="Toolbar" Grid.Row="0" MouseLeftButtonDown="Toolbar_OnMouseLeftButtonDown">
+            <Grid x:Name="Toolbar" Grid.Row="0" Background="Transparent"
+                  MouseLeftButtonDown="Toolbar_OnMouseLeftButtonDown">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />

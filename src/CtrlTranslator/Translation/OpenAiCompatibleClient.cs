@@ -36,15 +36,30 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
         IProgress<TranslationStreamUpdate>? progress,
         CancellationToken cancellationToken)
     {
+        int overallTimeoutSeconds = Math.Clamp(
+            request.RequestTimeoutSeconds,
+            1,
+            AppSettings.DefaultRequestTimeoutSeconds);
+        int firstTokenTimeoutSeconds = Math.Clamp(
+            request.FirstTokenTimeoutSeconds,
+            1,
+            AppSettings.DefaultFirstTokenTimeoutSeconds);
+        if (firstTokenTimeoutSeconds >= overallTimeoutSeconds)
+        {
+            // 首字超时必须先于整体超时，手工编辑配置也不能破坏这个判定顺序。
+            firstTokenTimeoutSeconds = Math.Max(1, overallTimeoutSeconds - 1);
+        }
+
         using var overallCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        overallCancellation.CancelAfter(TimeSpan.FromSeconds(request.RequestTimeoutSeconds));
+        overallCancellation.CancelAfter(TimeSpan.FromSeconds(overallTimeoutSeconds));
         using var firstTokenCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             overallCancellation.Token);
-        firstTokenCancellation.CancelAfter(TimeSpan.FromSeconds(request.FirstTokenTimeoutSeconds));
+        firstTokenCancellation.CancelAfter(TimeSpan.FromSeconds(firstTokenTimeoutSeconds));
 
         var stopwatch = Stopwatch.StartNew();
         long firstTokenLatency = 0;
+        long? responseHeadersLatency = null;
         var sawReasoning = false;
         var resultBuilder = new StringBuilder();
 
@@ -55,6 +70,7 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
                 httpRequest,
                 HttpCompletionOption.ResponseHeadersRead,
                 firstTokenCancellation.Token);
+            responseHeadersLatency = stopwatch.ElapsedMilliseconds;
 
             if (!response.IsSuccessStatusCode)
             {
@@ -128,13 +144,20 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
         }
         catch (OperationCanceledException) when (overallCancellation.IsCancellationRequested)
         {
-            Logger.Warning("翻译请求", $"翻译请求超过整体超时 {request.RequestTimeoutSeconds} 秒。");
-            throw new OverallTimeoutException(request.RequestTimeoutSeconds);
+            Logger.Warning("翻译请求", $"翻译请求超过整体超时 {overallTimeoutSeconds} 秒。");
+            throw new OverallTimeoutException(overallTimeoutSeconds);
         }
         catch (OperationCanceledException) when (firstTokenCancellation.IsCancellationRequested)
         {
-            Logger.Warning("翻译请求", $"翻译请求超过首字超时 {request.FirstTokenTimeoutSeconds} 秒。");
-            throw new FirstTokenTimeoutException(request.FirstTokenTimeoutSeconds);
+            string headersDescription = responseHeadersLatency.HasValue
+                ? $"，响应头耗时 {responseHeadersLatency.Value}ms"
+                : "，超时前未收到响应头";
+            Logger.Warning(
+                "翻译请求",
+                $"翻译请求超过首字超时 {firstTokenTimeoutSeconds} 秒{headersDescription}。");
+            throw new FirstTokenTimeoutException(
+                firstTokenTimeoutSeconds,
+                responseHeadersLatency);
         }
         catch (JsonException exception)
         {

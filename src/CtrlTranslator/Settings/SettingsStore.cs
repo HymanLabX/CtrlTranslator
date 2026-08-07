@@ -44,10 +44,12 @@ public sealed class SettingsStore
             AppSettings settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions)
                 ?? throw new JsonException("配置文件内容为空。");
             settings.Normalize();
+            bool timeoutsAdjusted = AdjustLegacyTimeouts(settings);
             DecryptApiKey(settings);
 
             // 老配置没有此字段时立即补写，空字符串则视为用户的明确选择并原样保留。
-            if (extraRequestBodyMissing && !TrySave(settings, out string? saveError))
+            if ((extraRequestBodyMissing || timeoutsAdjusted)
+                && !TrySave(settings, out string? saveError))
             {
                 LastWarning = saveError;
             }
@@ -185,5 +187,32 @@ public sealed class SettingsStore
         return document.RootElement.ValueKind == JsonValueKind.Object
             && document.RootElement.EnumerateObject().Any(property =>
                 string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool AdjustLegacyTimeouts(AppSettings settings)
+    {
+        int previousRequestTimeout = settings.RequestTimeoutSeconds;
+        int previousFirstTokenTimeout = settings.FirstTokenTimeoutSeconds;
+
+        if (settings.RequestTimeoutSeconds > AppSettings.DefaultRequestTimeoutSeconds)
+        {
+            settings.RequestTimeoutSeconds = AppSettings.DefaultRequestTimeoutSeconds;
+        }
+
+        if (settings.FirstTokenTimeoutSeconds > AppSettings.DefaultFirstTokenTimeoutSeconds)
+        {
+            settings.FirstTokenTimeoutSeconds = AppSettings.DefaultFirstTokenTimeoutSeconds;
+        }
+
+        bool adjusted = previousRequestTimeout != settings.RequestTimeoutSeconds
+            || previousFirstTokenTimeout != settings.FirstTokenTimeoutSeconds;
+        if (adjusted)
+        {
+            Logger.Info(
+                "设置",
+                $"旧配置的超时值已下调：整体超时 {previousRequestTimeout}→{settings.RequestTimeoutSeconds} 秒，首字超时 {previousFirstTokenTimeout}→{settings.FirstTokenTimeoutSeconds} 秒。");
+        }
+
+        return adjusted;
     }
 }

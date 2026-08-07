@@ -370,7 +370,10 @@ public partial class App : System.Windows.Application
         catch (ClipboardUnavailableException exception)
         {
             Logger.Error("取词", "剪贴板在重试后仍不可用。", exception);
-            ShowCaptureError(ErrorMessages.FromException(exception, _settings?.Model ?? string.Empty));
+            ShowCaptureError(ErrorMessages.FromException(
+                exception,
+                _settings?.Model ?? string.Empty,
+                IsThinkingDisabled()));
         }
         catch (Exception exception)
         {
@@ -430,7 +433,8 @@ public partial class App : System.Windows.Application
             {
                 popup.ShowTranslationError(ErrorMessages.FromException(
                     exception,
-                    _settings?.Model ?? string.Empty));
+                    _settings?.Model ?? string.Empty,
+                    IsThinkingDisabled()));
             }
         }
     }
@@ -513,6 +517,9 @@ public partial class App : System.Windows.Application
                     break;
                 case ErrorAction.OpenLog:
                     _trayIcon?.OpenLogDirectory();
+                    break;
+                case ErrorAction.DisableThinking when sender is PopupWindow thinkingPopup:
+                    Popup_OnDisableThinkingRequested(thinkingPopup, EventArgs.Empty);
                     break;
             }
         }
@@ -665,6 +672,11 @@ public partial class App : System.Windows.Application
     {
         // M3 接入设置界面前，此值由启动时读取的 settings.json 提供。
         return Math.Clamp(_settings?.ClipboardWaitMs ?? 300, 100, 1000);
+    }
+
+    private bool IsThinkingDisabled()
+    {
+        return ExtraRequestBodyHelper.IsThinkingDisabled(_settings?.ExtraRequestBody);
     }
 
     private static void TryLogStartupFailure(Exception exception)
