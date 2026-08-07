@@ -52,6 +52,7 @@ public partial class SettingsWindow : Window
     private readonly SettingsStore _settingsStore;
     private readonly HistoryRepository _historyRepository;
     private readonly Action<SettingsChangeKind> _settingsChanged;
+    private readonly Action _diagnosticsRequested;
     private readonly DispatcherTimer _triggerSaveTimer;
     private CancellationTokenSource? _modelFetchCancellation;
     private bool _loading = true;
@@ -62,13 +63,15 @@ public partial class SettingsWindow : Window
         AppSettings settings,
         SettingsStore settingsStore,
         HistoryRepository historyRepository,
-        Action<SettingsChangeKind> settingsChanged)
+        Action<SettingsChangeKind> settingsChanged,
+        Action diagnosticsRequested)
     {
         InitializeComponent();
         _settings = settings;
         _settingsStore = settingsStore;
         _historyRepository = historyRepository;
         _settingsChanged = settingsChanged;
+        _diagnosticsRequested = diagnosticsRequested;
         _triggerSaveTimer = new DispatcherTimer(
             TimeSpan.FromMilliseconds(250),
             DispatcherPriority.Background,
@@ -572,11 +575,7 @@ public partial class SettingsWindow : Window
 
     private void DiagnosticsButton_OnClick(object sender, RoutedEventArgs e)
     {
-        System.Windows.MessageBox.Show(
-            "一键诊断将在 M3 下半部分接通。现在可以先用「拉取可用模型」检查服务地址、密钥和模型列表。",
-            "一键诊断",
-            MessageBoxButton.OK,
-            MessageBoxImage.Information);
+        ExecuteUiAction("打开一键诊断", _diagnosticsRequested);
     }
 
     private void CurrentModeCombo_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -857,6 +856,26 @@ public partial class SettingsWindow : Window
             Directory.CreateDirectory(target);
             Process.Start(new ProcessStartInfo { FileName = target, UseShellExecute = true });
         });
+    }
+
+    private async void ExportHistoryButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string? path = await HistoryCsvExporter.ExportAsync(
+                _historyRepository, this, CancellationToken.None);
+            if (path is not null)
+            {
+                System.Windows.MessageBox.Show(this, "历史记录已导出。", "导出完成",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("设置", "从设置窗口导出历史失败。", exception);
+            System.Windows.MessageBox.Show(this, "导出失败，请确认保存位置可写后重试。", "导出失败",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private void EditableControl_OnLostKeyboardFocus(object sender, System.Windows.Input.KeyboardFocusChangedEventArgs e) => SaveAll();

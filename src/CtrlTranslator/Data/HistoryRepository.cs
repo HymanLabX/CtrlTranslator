@@ -90,6 +90,119 @@ public sealed class HistoryRepository
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<TranslationRecord>> QueryAsync(
+        string keyword,
+        bool starredOnly,
+        int offset,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteConnection connection = _database.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, cache_key, source_text, result_text, target_lang, mode_id,
+                   model, is_word, starred, app_name, latency_ms, created_at
+              FROM translations
+             WHERE ($starred_only = 0 OR starred = 1)
+               AND ($keyword = '' OR source_text LIKE $pattern ESCAPE '\' OR result_text LIKE $pattern ESCAPE '\')
+             ORDER BY created_at DESC
+             LIMIT $limit OFFSET $offset;
+            """;
+        command.Parameters.AddWithValue("$starred_only", starredOnly ? 1 : 0);
+        command.Parameters.AddWithValue("$keyword", keyword);
+        command.Parameters.AddWithValue("$pattern", $"%{EscapeLikePattern(keyword)}%");
+        command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 500));
+        command.Parameters.AddWithValue("$offset", Math.Max(0, offset));
+
+        List<TranslationRecord> records = [];
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            records.Add(ReadRecord(reader));
+        }
+
+        return records;
+    }
+
+    public async Task<IReadOnlyList<TranslationRecord>> GetAllAsync(CancellationToken cancellationToken)
+    {
+        await using SqliteConnection connection = _database.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, cache_key, source_text, result_text, target_lang, mode_id,
+                   model, is_word, starred, app_name, latency_ms, created_at
+              FROM translations
+             ORDER BY created_at DESC;
+            """;
+
+        List<TranslationRecord> records = [];
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            records.Add(ReadRecord(reader));
+        }
+
+        return records;
+    }
+
+    public async Task DeleteAsync(long id, CancellationToken cancellationToken)
+    {
+        await using SqliteConnection connection = _database.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM translations WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", id);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task RunReadWriteDiagnosticAsync(CancellationToken cancellationToken)
+    {
+        string marker = $"diagnostic-{Guid.NewGuid():N}";
+        await using SqliteConnection connection = _database.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using SqliteTransaction transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+        await using (SqliteCommand insert = connection.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO translations
+                    (cache_key, source_text, result_text, target_lang, mode_id, model,
+                     is_word, starred, app_name, latency_ms, created_at)
+                VALUES ($marker, $marker, '诊断', 'zh-CN', 'diagnostic', 'diagnostic',
+                        0, 0, 'CtrlTranslator', 0, $created_at);
+                """;
+            insert.Parameters.AddWithValue("$marker", marker);
+            insert.Parameters.AddWithValue("$created_at", DateTime.Now.ToString("O", CultureInfo.InvariantCulture));
+            await insert.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (SqliteCommand read = connection.CreateCommand())
+        {
+            read.Transaction = transaction;
+            read.CommandText = "SELECT result_text FROM translations WHERE cache_key = $marker;";
+            read.Parameters.AddWithValue("$marker", marker);
+            object? value = await read.ExecuteScalarAsync(cancellationToken);
+            if (!string.Equals(value as string, "诊断", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("数据库写入后无法正确读回。");
+            }
+        }
+
+        await using (SqliteCommand delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM translations WHERE cache_key = $marker;";
+            delete.Parameters.AddWithValue("$marker", marker);
+            await delete.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     public async Task ClearAllAsync(CancellationToken cancellationToken)
     {
         await ExecuteDeleteAsync("DELETE FROM translations;", cancellationToken);
@@ -108,6 +221,11 @@ public sealed class HistoryRepository
         command.CommandText = commandText;
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
+
+    private static string EscapeLikePattern(string value) =>
+        value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
 
     private static void AddRecordParameters(SqliteCommand command, TranslationRecord record)
     {

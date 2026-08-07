@@ -10,12 +10,10 @@ using Forms = System.Windows.Forms;
 namespace CtrlTranslator.UI;
 
 /// <summary>
-/// 管理通知区域图标和 M0 所需的完整菜单外壳。
+/// 管理通知区域图标和应用的常用入口。
 /// </summary>
 public sealed class TrayIconController : IDisposable
 {
-    private const string LaterMessage = "该功能将在后续里程碑实现。";
-
     private readonly AppSettings _settings;
     private readonly SettingsStore _settingsStore;
     private readonly Forms.NotifyIcon _notifyIcon;
@@ -37,7 +35,7 @@ public sealed class TrayIconController : IDisposable
         _pausedIcon = LoadIcon("Assets/ctrltranslator-paused.ico");
 
         _menu = new Forms.ContextMenuStrip();
-        _menu.Items.Add(CreateActionItem("打开主窗口", ShowLaterMessage));
+        _menu.Items.Add(CreateActionItem("打开主窗口", () => RaiseRequested(MainWindowRequested, "主窗口")));
         _menu.Items.Add(CreateActionItem("设置…", RaiseSettingsRequested));
         _menu.Items.Add(new Forms.ToolStripSeparator());
 
@@ -73,10 +71,10 @@ public sealed class TrayIconController : IDisposable
         _menu.Items.Add(_privacyItem);
         _menu.Items.Add(new Forms.ToolStripSeparator());
 
-        _menu.Items.Add(CreateActionItem("一键诊断…", ShowLaterMessage));
+        _menu.Items.Add(CreateActionItem("一键诊断…", () => RaiseRequested(DiagnosticsRequested, "诊断窗口")));
         _menu.Items.Add(CreateActionItem("打开日志文件夹", OpenLogDirectory));
         _menu.Items.Add(new Forms.ToolStripSeparator());
-        _menu.Items.Add(CreateActionItem("关于", ShowLaterMessage));
+        _menu.Items.Add(CreateActionItem("关于", () => RaiseRequested(AboutRequested, "关于窗口")));
         _menu.Items.Add(CreateActionItem("退出", () => System.Windows.Application.Current.Shutdown()));
 
         _notifyIcon = new Forms.NotifyIcon
@@ -90,6 +88,12 @@ public sealed class TrayIconController : IDisposable
     }
 
     public event EventHandler? SettingsRequested;
+
+    public event EventHandler? MainWindowRequested;
+
+    public event EventHandler? DiagnosticsRequested;
+
+    public event EventHandler? AboutRequested;
 
     public void ShowInformation(string title, string message)
     {
@@ -172,7 +176,7 @@ public sealed class TrayIconController : IDisposable
         {
             if (eventArgs.Button == Forms.MouseButtons.Left)
             {
-                ShowLaterMessage();
+                RaiseRequested(MainWindowRequested, "主窗口");
             }
         });
     }
@@ -274,15 +278,6 @@ public sealed class TrayIconController : IDisposable
         }
     }
 
-    private static void ShowLaterMessage()
-    {
-        System.Windows.MessageBox.Show(
-            LaterMessage,
-            "CtrlTranslator",
-            MessageBoxButton.OK,
-            MessageBoxImage.Information);
-    }
-
     private void RaiseSettingsRequested()
     {
         EventHandler? handler = SettingsRequested;
@@ -290,6 +285,18 @@ public sealed class TrayIconController : IDisposable
         {
             Logger.Error("托盘", "用户点击设置，但设置窗口没有订阅者。");
             ShowError("设置窗口还没有准备好，请退出程序后重新打开再试。");
+            return;
+        }
+
+        handler.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RaiseRequested(EventHandler? handler, string featureName)
+    {
+        if (handler is null)
+        {
+            Logger.Error("托盘", $"用户打开{featureName}，但没有可用的处理程序。");
+            ShowError($"{featureName}还没有准备好，请退出程序后重新打开再试。");
             return;
         }
 

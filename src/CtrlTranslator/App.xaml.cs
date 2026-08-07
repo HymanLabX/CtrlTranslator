@@ -37,6 +37,9 @@ public partial class App : System.Windows.Application
     private HistoryRepository? _historyRepository;
     private PopupWindow? _popupWindow;
     private SettingsWindow? _settingsWindow;
+    private MainWindow? _mainWindow;
+    private DiagnosticWindow? _diagnosticWindow;
+    private OnboardingWindow? _onboardingWindow;
     private bool _loggerInitialized;
     private int _unhandledExceptionReported;
 
@@ -63,12 +66,16 @@ public partial class App : System.Windows.Application
 
             SettingsStore settingsStore = new();
             _settingsStore = settingsStore;
+            bool isFirstRun = !File.Exists(settingsStore.SettingsPath);
             AppSettings settings = settingsStore.LoadOrCreate();
             _settings = settings;
             Logger.SetApiKey(settings.ApiKey);
 
             _trayIcon = new TrayIconController(settings, settingsStore);
             _trayIcon.SettingsRequested += TrayIcon_OnSettingsRequested;
+            _trayIcon.MainWindowRequested += TrayIcon_OnMainWindowRequested;
+            _trayIcon.DiagnosticsRequested += TrayIcon_OnDiagnosticsRequested;
+            _trayIcon.AboutRequested += TrayIcon_OnAboutRequested;
             if (!string.IsNullOrWhiteSpace(settingsStore.LastWarning))
             {
                 System.Windows.MessageBox.Show(
@@ -98,6 +105,10 @@ public partial class App : System.Windows.Application
             InstallKeyboardHook(settings);
 
             Logger.Info("应用", "CtrlTranslator 已启动，托盘图标已显示。");
+            if (isFirstRun)
+            {
+                ShowOnboardingWindow();
+            }
         }
         catch (Exception exception)
         {
@@ -119,6 +130,9 @@ public partial class App : System.Windows.Application
         {
             _popupWindow?.Close();
             _settingsWindow?.Close();
+            _mainWindow?.Close();
+            _diagnosticWindow?.Close();
+            _onboardingWindow?.Close();
             _translationService?.Dispose();
             DisposeKeyboardHook();
         }
@@ -142,6 +156,9 @@ public partial class App : System.Windows.Application
             if (_trayIcon is not null)
             {
                 _trayIcon.SettingsRequested -= TrayIcon_OnSettingsRequested;
+                _trayIcon.MainWindowRequested -= TrayIcon_OnMainWindowRequested;
+                _trayIcon.DiagnosticsRequested -= TrayIcon_OnDiagnosticsRequested;
+                _trayIcon.AboutRequested -= TrayIcon_OnAboutRequested;
             }
 
             _trayIcon?.Dispose();
@@ -232,7 +249,7 @@ public partial class App : System.Windows.Application
             }
             else
             {
-                _trayIcon?.ShowInformation("CtrlTranslator", "程序已经在运行。主窗口将在后续里程碑提供。");
+                ShowMainWindow();
             }
 
             Logger.Info("应用", "已处理第二个实例的激活请求。");
@@ -419,6 +436,18 @@ public partial class App : System.Windows.Application
             {
                 popup.ShowResult(result);
             }
+
+            if (_mainWindow is not null)
+            {
+                try
+                {
+                    await _mainWindow.RefreshAsync();
+                }
+                catch (Exception exception)
+                {
+                    Logger.Error("主窗口", "翻译完成后刷新历史列表失败。", exception);
+                }
+            }
         }
         catch (OperationCanceledException)
         {
@@ -507,11 +536,7 @@ public partial class App : System.Windows.Application
                     _ = StartTranslationAsync(retryPopup.SourceText, retryPopup.AppName);
                     break;
                 case ErrorAction.Diagnostics:
-                    System.Windows.MessageBox.Show(
-                        "请先检查网络和翻译服务配置。完整的一键诊断将在下一里程碑提供；当前可打开日志查看详情。",
-                        "一键诊断",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Information);
+                    ShowDiagnosticWindow();
                     break;
                 case ErrorAction.OpenLog:
                     _trayIcon?.OpenLogDirectory();
@@ -535,6 +560,10 @@ public partial class App : System.Windows.Application
             {
                 await _translationService.SetStarredAsync(e.RecordId, e.Starred, CancellationToken.None);
                 Logger.Info("收藏", e.Starred ? "翻译已收藏。" : "翻译已取消收藏。");
+                if (_mainWindow is not null)
+                {
+                    await _mainWindow.RefreshAsync();
+                }
             }
             else
             {
@@ -672,6 +701,164 @@ public partial class App : System.Windows.Application
         return Math.Clamp(_settings?.ClipboardWaitMs ?? 300, 100, 1000);
     }
 
+    private void TrayIcon_OnMainWindowRequested(object? sender, EventArgs e) => ShowMainWindow();
+
+    private void TrayIcon_OnDiagnosticsRequested(object? sender, EventArgs e) => ShowDiagnosticWindow();
+
+    private void TrayIcon_OnAboutRequested(object? sender, EventArgs e)
+    {
+        try
+        {
+            System.Windows.MessageBox.Show(
+                "CtrlTranslator v1.0\n\n在任意程序中选中文字，快速双击 Ctrl 即可翻译。\nAPI Key 加密保存在本机，翻译内容默认不会写入日志。",
+                "关于 CtrlTranslator",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("关于", "显示关于信息失败。", exception);
+        }
+    }
+
+    private void ShowMainWindow()
+    {
+        try
+        {
+            if (_historyRepository is null)
+            {
+                throw new InvalidOperationException("历史服务尚未初始化。");
+            }
+
+            if (_mainWindow is null)
+            {
+                _mainWindow = new MainWindow(_historyRepository);
+                _mainWindow.Closed += MainWindow_OnClosed;
+            }
+
+            if (_mainWindow.WindowState == WindowState.Minimized)
+            {
+                _mainWindow.WindowState = WindowState.Normal;
+            }
+
+            _mainWindow.Show();
+            _mainWindow.Activate();
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("主窗口", "打开主窗口失败。", exception);
+            System.Windows.MessageBox.Show("主窗口没有打开成功，详情已写入日志。", "CtrlTranslator",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void MainWindow_OnClosed(object? sender, EventArgs e)
+    {
+        if (sender is MainWindow window)
+        {
+            window.Closed -= MainWindow_OnClosed;
+            if (ReferenceEquals(_mainWindow, window))
+            {
+                _mainWindow = null;
+            }
+        }
+    }
+
+    private void ShowDiagnosticWindow() => ShowDiagnosticWindow(_settings);
+
+    private void ShowDiagnosticWindow(AppSettings? diagnosticSettings)
+    {
+        try
+        {
+            if (diagnosticSettings is null || _historyRepository is null)
+            {
+                throw new InvalidOperationException("诊断服务尚未初始化。");
+            }
+
+            if (_diagnosticWindow is null)
+            {
+                DiagnosticRunner runner = new(
+                    diagnosticSettings,
+                    _historyRepository,
+                    () => _keyboardHook?.IsInstalled == true);
+                _diagnosticWindow = new DiagnosticWindow(runner)
+                {
+                    Owner = Windows.Cast<Window>().FirstOrDefault(window =>
+                        window.IsActive && window is not DiagnosticWindow)
+                };
+                _diagnosticWindow.Closed += DiagnosticWindow_OnClosed;
+            }
+
+            if (_diagnosticWindow.WindowState == WindowState.Minimized)
+            {
+                _diagnosticWindow.WindowState = WindowState.Normal;
+            }
+
+            _diagnosticWindow.Show();
+            _diagnosticWindow.Activate();
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("一键诊断", "打开诊断窗口失败。", exception);
+            System.Windows.MessageBox.Show("诊断窗口没有打开成功，详情已写入日志。", "CtrlTranslator",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void DiagnosticWindow_OnClosed(object? sender, EventArgs e)
+    {
+        if (sender is DiagnosticWindow window)
+        {
+            window.Closed -= DiagnosticWindow_OnClosed;
+            if (ReferenceEquals(_diagnosticWindow, window))
+            {
+                _diagnosticWindow = null;
+            }
+        }
+    }
+
+    private void ShowOnboardingWindow()
+    {
+        try
+        {
+            if (_settings is null || _settingsStore is null)
+            {
+                throw new InvalidOperationException("首次设置服务尚未初始化。");
+            }
+
+            if (_onboardingWindow is null)
+            {
+                _onboardingWindow = new OnboardingWindow(
+                    _settings,
+                    _settingsStore,
+                    () => OnSettingsChanged(SettingsChangeKind.General),
+                    ShowDiagnosticWindow);
+                _onboardingWindow.Closed += OnboardingWindow_OnClosed;
+            }
+
+            _onboardingWindow.Show();
+            _onboardingWindow.Activate();
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("首次向导", "打开首次设置向导失败。", exception);
+            System.Windows.MessageBox.Show("首次设置向导没有打开成功，请从托盘菜单打开“设置”。", "CtrlTranslator",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void OnboardingWindow_OnClosed(object? sender, EventArgs e)
+    {
+        if (sender is OnboardingWindow window)
+        {
+            window.Closed -= OnboardingWindow_OnClosed;
+            if (ReferenceEquals(_onboardingWindow, window))
+            {
+                _onboardingWindow = null;
+            }
+        }
+    }
+
     private void TrayIcon_OnSettingsRequested(object? sender, EventArgs e)
     {
         ShowSettingsWindow(focusExtraRequestBody: false);
@@ -698,7 +885,8 @@ public partial class App : System.Windows.Application
                     _settings,
                     _settingsStore,
                     _historyRepository,
-                    OnSettingsChanged);
+                    OnSettingsChanged,
+                    ShowDiagnosticWindow);
                 _settingsWindow.Closed += SettingsWindow_OnClosed;
             }
 
