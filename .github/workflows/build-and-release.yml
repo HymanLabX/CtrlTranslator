@@ -1,0 +1,136 @@
+# CtrlTranslator 自动构建 / 自动发版
+#
+# 这个文件解决两件事：
+#   1. 每次往 main 推代码，GitHub 会在一台干净的 Windows 上重新编译一遍。
+#      编译不过会给你发邮件 —— 不用等到你本机打包时才发现。
+#   2. 推一个 v 开头的 tag，GitHub 自动打包出 exe 并建好 Release。
+#      再也不会出现「改了代码忘了重新打包，结果测的是旧 exe」。
+#
+# 怎么发新版本（在项目根目录执行两条命令）：
+#     git tag v1.0-rc2
+#     git push origin v1.0-rc2
+# 然后去仓库的 Actions 页面看进度，几分钟后 Releases 页面就有新版本了。
+# tag 里带 rc / beta / alpha / preview 字样的会自动标成「预发布」。
+#
+# 发错了想撤回：
+#     gh release delete v1.0-rc2 --yes    # 删 Release
+#     git push origin :refs/tags/v1.0-rc2 # 删远端 tag
+#     git tag -d v1.0-rc2                 # 删本地 tag
+
+name: 构建与发布
+
+on:
+  push:
+    branches: [main]      # 推 main：只编译验证，不发版
+    tags: ['v*']          # 推 v 开头的 tag：编译 + 发版
+  workflow_dispatch: {}   # 也可以在 Actions 页面手动点一下
+
+permissions:
+  contents: write         # 建 Release 需要写权限
+
+jobs:
+  build:
+    # 必须用 Windows：项目是 WPF，只能在 Windows 上编译。
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 安装 .NET 10 SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: 还原依赖
+        run: dotnet restore CtrlTranslator.sln
+
+      # 下面这段参数必须和 build.ps1 保持一致，改一处就要同步改另一处。
+      # PublishTrimmed 必须为 false —— WPF 不支持裁剪，开了会在运行时随机崩溃。
+      # IncludeNativeLibrariesForSelfExtract 用于把 SQLite 的原生库打进单文件。
+      - name: 发布自包含单文件 exe
+        run: >
+          dotnet publish src/CtrlTranslator/CtrlTranslator.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:PublishTrimmed=false
+          -o publish
+
+      - name: 校验产物并计算 SHA256
+        id: artifact
+        shell: pwsh
+        run: |
+          $exe = 'publish/CtrlTranslator.exe'
+          if (-not (Test-Path $exe)) {
+            Write-Host '::error::发布命令成功了，但没找到 publish/CtrlTranslator.exe'
+            exit 1
+          }
+          $sizeMb = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
+          # 自包含的 WPF 单文件正常在 60-90 MB。明显偏小说明打包参数被改坏了，
+          # 这种 exe 拷到别人电脑上会因为缺 .NET 运行时而打不开。
+          if ($sizeMb -lt 40) {
+            Write-Host "::error::产物只有 $sizeMb MB，太小了，多半不是自包含的，请检查打包参数"
+            exit 1
+          }
+          Write-Host "大小：$sizeMb MB"
+          Write-Host "SHA256：$hash"
+          "size_mb=$sizeMb" >> $env:GITHUB_OUTPUT
+          "sha256=$hash"    >> $env:GITHUB_OUTPUT
+
+      # 不是 tag 触发时也留一份产物，方便临时拿去测。
+      # 注意：从 Actions 页面下载下来的是个 zip，要解压才能拿到 exe。保留 30 天。
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v7
+        with:
+          name: CtrlTranslator-exe
+          path: publish/CtrlTranslator.exe
+          retention-days: 30
+
+      # 只有推 tag 时才发版。推 main 只是编译验证，不会产生 Release。
+      - name: 创建 Release 并上传 exe
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          SHA256: ${{ steps.artifact.outputs.sha256 }}
+          SIZE_MB: ${{ steps.artifact.outputs.size_mb }}
+        run: |
+          $fence = '```'
+          $lines = @(
+            "由 tag ``$env:TAG`` 自动构建。",
+            '',
+            '下载下面的 `CtrlTranslator.exe`，双击即可运行，不需要安装 .NET。',
+            '首次启动会引导你填 API 地址和 Key。',
+            '',
+            "用法、已知限制和排查方法见 [README](https://github.com/$env:REPO#readme)。",
+            '',
+            '### 校验',
+            '',
+            $fence,
+            "SHA256  $env:SHA256",
+            "大小    $env:SIZE_MB MB",
+            $fence
+          )
+          $lines -join "`n" | Set-Content release-notes.md -Encoding utf8
+
+          # tag 里带 rc / beta / alpha / preview 的自动标成预发布
+          $ghArgs = @(
+            'release', 'create', $env:TAG,
+            'publish/CtrlTranslator.exe',
+            '--title', "CtrlTranslator $env:TAG",
+            '--notes-file', 'release-notes.md'
+          )
+          if ($env:TAG -match 'rc|beta|alpha|preview') { $ghArgs += '--prerelease' }
+
+          gh @ghArgs
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host '::error::建 Release 失败。如果提示 already exists，说明这个 tag 之前发过了，先删掉旧 Release 再重推 tag。'
+            exit 1
+          }

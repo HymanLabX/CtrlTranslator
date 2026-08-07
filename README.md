@@ -173,4 +173,26 @@ dotnet run --project src/CtrlTranslator
 
 打包产物约 73 MB，自包含 —— 目标机器不需要装 .NET 运行时。
 
+> ⚠️ 改完代码后，`publish\CtrlTranslator.exe` **不会自动更新**。
+> 测试改动请用 `dotnet run`，只有验证打包产物时才需要先跑 `.\build.ps1`。
+
 项目文档在 `docs/`：`SPEC.md` 是完整需求规格书，`MILESTONES.md` 是分阶段验收清单。
+
+## 发布新版本
+
+每次推送到 `main` 都会在 GitHub 上自动编译一遍（编译不过会收到邮件）。
+要发版本，推一个 `v` 开头的 tag 即可，exe 由 GitHub 自动打包并发布：
+
+```powershell
+git tag v1.0-rc2
+git push origin v1.0-rc2
+```
+
+tag 里带 `rc` / `beta` / `alpha` / `preview` 的会自动标为预发布。
+流程定义在 [.github/workflows/build-and-release.yml](.github/workflows/build-and-release.yml)。
+
+---
+
+## 许可
+
+[MIT](LICENSE) —— 可自由使用、修改、分发和商用，保留版权声明即可。
