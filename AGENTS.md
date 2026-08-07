@@ -78,6 +78,10 @@ System.Speech
 
 ```
 CtrlTranslator.sln
+LICENSE                         # MIT，不要改
+build.ps1                       # 本机打包脚本
+.github/workflows/
+└─ build-and-release.yml        # GitHub 自动编译 + 自动发版
 src/CtrlTranslator/
 ├─ CtrlTranslator.csproj
 ├─ app.manifest              # DPI 感知声明
@@ -177,6 +181,22 @@ dotnet run --project src/CtrlTranslator   # 必须：能启动且不崩溃
 - 提交信息用中文，格式：`M2 完成：翻译闭环（API 客户端 + 浮窗 + 缓存）`
 - **不要**创建分支、不要 rebase、不要 force push
 - **不要修改 `docs/` 下的任何文件**，那是需求文档，只读
+- **不要**自己打 tag 或发 Release，那是负责人的操作
+
+### 5.7 打包参数有两份，必须同步
+
+打包参数同时出现在两个地方：
+
+| 文件 | 用途 |
+|---|---|
+| `build.ps1` | 负责人在本机手动打包 |
+| `.github/workflows/build-and-release.yml` | GitHub 推 tag 时自动打包发版 |
+
+**改了任何一处的 `dotnet publish` 参数，必须同步改另一处。**
+只改一处的后果是：本机测着好好的，用户从 Releases 下载到的却是另一个东西 ——
+而负责人不会编程，这种不一致他排查不出来。
+
+`PublishTrimmed` 永远是 `false`（WPF 不支持裁剪，开了会在运行时随机崩溃）。
 
 ---
 
