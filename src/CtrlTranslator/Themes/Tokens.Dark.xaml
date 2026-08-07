@@ -2,14 +2,14 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:sys="clr-namespace:System;assembly=System.Runtime">
     <!-- 深浅主题的键名必须完全一致，应用才能整本替换。 -->
-    <Color x:Key="Color.Bg">#16181D</Color>
-    <Color x:Key="Color.Surface">#1C1F26</Color>
-    <Color x:Key="Color.SurfaceSubtle">#212530</Color>
-    <Color x:Key="Color.Border">#2A2E37</Color>
-    <Color x:Key="Color.BorderStrong">#3A3F4B</Color>
-    <Color x:Key="Color.Text">#ECEDEE</Color>
-    <Color x:Key="Color.TextSecondary">#9BA1AC</Color>
-    <Color x:Key="Color.TextTertiary">#6B7280</Color>
+    <Color x:Key="Color.Bg">#15130F</Color>
+    <Color x:Key="Color.Surface">#1B1917</Color>
+    <Color x:Key="Color.SurfaceSubtle">#221F1B</Color>
+    <Color x:Key="Color.Border">#302B25</Color>
+    <Color x:Key="Color.BorderStrong">#453E35</Color>
+    <Color x:Key="Color.Text">#EDE7DE</Color>
+    <Color x:Key="Color.TextSecondary">#A79D91</Color>
+    <Color x:Key="Color.TextTertiary">#766D62</Color>
     <Color x:Key="Color.Accent">#6C93F7</Color>
     <Color x:Key="Color.AccentHover">#8AA9F9</Color>
     <Color x:Key="Color.AccentSubtle">#1E2739</Color>
@@ -68,5 +68,5 @@
 
     <DropShadowEffect x:Key="Effect.PopupShadow"
                       BlurRadius="24" ShadowDepth="4" Direction="270"
-                      Opacity="0.45" Color="#000000" />
+                      Opacity="0.50" Color="#000000" />
 </ResourceDictionary>

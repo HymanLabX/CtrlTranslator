@@ -2,14 +2,14 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:sys="clr-namespace:System;assembly=System.Runtime">
     <!-- 颜色令牌 -->
-    <Color x:Key="Color.Bg">#FFFFFF</Color>
-    <Color x:Key="Color.Surface">#FFFFFF</Color>
-    <Color x:Key="Color.SurfaceSubtle">#FAFAFA</Color>
-    <Color x:Key="Color.Border">#E4E4E7</Color>
-    <Color x:Key="Color.BorderStrong">#D4D4D8</Color>
-    <Color x:Key="Color.Text">#18181B</Color>
-    <Color x:Key="Color.TextSecondary">#71717A</Color>
-    <Color x:Key="Color.TextTertiary">#A1A1AA</Color>
+    <Color x:Key="Color.Bg">#F7F3EC</Color>
+    <Color x:Key="Color.Surface">#FBF8F3</Color>
+    <Color x:Key="Color.SurfaceSubtle">#F2EDE4</Color>
+    <Color x:Key="Color.Border">#E0D8CA</Color>
+    <Color x:Key="Color.BorderStrong">#CFC5B4</Color>
+    <Color x:Key="Color.Text">#1F1B16</Color>
+    <Color x:Key="Color.TextSecondary">#6E655A</Color>
+    <Color x:Key="Color.TextTertiary">#9A9086</Color>
     <Color x:Key="Color.Accent">#4F7DF3</Color>
     <Color x:Key="Color.AccentHover">#3D6AE0</Color>
     <Color x:Key="Color.AccentSubtle">#EFF4FE</Color>
@@ -72,5 +72,5 @@
     <!-- 只有浮窗使用这个阴影。 -->
     <DropShadowEffect x:Key="Effect.PopupShadow"
                       BlurRadius="24" ShadowDepth="4" Direction="270"
-                      Opacity="0.10" Color="#000000" />
+                      Opacity="0.18" Color="#000000" />
 </ResourceDictionary>

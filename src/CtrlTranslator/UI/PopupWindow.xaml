@@ -67,9 +67,9 @@
 
     <Border x:Name="ShellBorder"
             Background="{DynamicResource Brush.Surface}"
-            BorderBrush="{DynamicResource Brush.Border}"
+            BorderBrush="{DynamicResource Brush.BorderStrong}"
             CornerRadius="{DynamicResource Radius.Large}"
-            BorderThickness="1"
+            BorderThickness="1.5"
             Padding="16"
             Effect="{DynamicResource Effect.PopupShadow}">
         <Grid>
