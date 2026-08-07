@@ -781,23 +781,41 @@ public partial class SettingsWindow : Window
     {
         try
         {
+            // SPEC §7.4：清空操作前必须报出会删多少、保留多少，且绝不删除星标收藏。
+            (int nonStarred, int starred) = await _historyRepository.CountAsync(CancellationToken.None);
+            if (nonStarred == 0)
+            {
+                System.Windows.MessageBox.Show(
+                    starred == 0
+                        ? "还没有任何翻译记录。"
+                        : $"没有可清空的历史记录。你收藏的 {starred} 条会一直保留。",
+                    "清空历史记录",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
             if (System.Windows.MessageBox.Show(
-                    "确定清空所有翻译历史吗？收藏内容也会一起删除，且无法恢复。",
-                    "清空所有历史",
+                    $"将删除 {nonStarred} 条历史记录。你收藏的 {starred} 条会保留。确定吗？",
+                    "清空历史记录",
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Warning) != MessageBoxResult.Yes)
             {
                 return;
             }
 
-            await _historyRepository.ClearAllAsync(CancellationToken.None);
-            Logger.Info("数据库", "用户已清空所有翻译历史。" );
-            System.Windows.MessageBox.Show("所有翻译历史已清空。", "清空所有历史", MessageBoxButton.OK, MessageBoxImage.Information);
+            await _historyRepository.ClearNonStarredAsync(CancellationToken.None);
+            Logger.Info("数据库", $"用户已清空 {nonStarred} 条历史记录，保留收藏 {starred} 条。");
+            System.Windows.MessageBox.Show(
+                $"已删除 {nonStarred} 条历史记录，收藏的 {starred} 条已保留。",
+                "清空历史记录",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
         catch (Exception exception)
         {
-            Logger.Error("数据库", "清空所有翻译历史失败。", exception);
-            System.Windows.MessageBox.Show("历史记录没有清空成功，详情已记录到日志。", "清空所有历史", MessageBoxButton.OK, MessageBoxImage.Error);
+            Logger.Error("数据库", "清空历史记录失败。", exception);
+            System.Windows.MessageBox.Show("历史记录没有清空成功，详情已记录到日志。", "清空历史记录", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -805,8 +823,19 @@ public partial class SettingsWindow : Window
     {
         try
         {
+            (int nonStarred, int starred) = await _historyRepository.CountAsync(CancellationToken.None);
+            if (nonStarred == 0)
+            {
+                System.Windows.MessageBox.Show(
+                    "没有可清除的缓存记录。",
+                    "清空缓存",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
             if (System.Windows.MessageBox.Show(
-                    "确定清空缓存吗？这会删除未收藏的历史记录，已收藏内容会保留。",
+                    $"将清除 {nonStarred} 条缓存记录，下次翻译相同内容需要重新请求。收藏的 {starred} 条会保留。",
                     "清空缓存",
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Question) != MessageBoxResult.Yes)
@@ -815,8 +844,12 @@ public partial class SettingsWindow : Window
             }
 
             await _historyRepository.ClearNonStarredAsync(CancellationToken.None);
-            Logger.Info("数据库", "用户已清空翻译缓存，收藏内容已保留。" );
-            System.Windows.MessageBox.Show("缓存已清空，收藏内容已保留。", "清空缓存", MessageBoxButton.OK, MessageBoxImage.Information);
+            Logger.Info("数据库", $"用户已清除 {nonStarred} 条缓存，保留收藏 {starred} 条。");
+            System.Windows.MessageBox.Show(
+                $"已清除 {nonStarred} 条缓存，收藏的 {starred} 条已保留。",
+                "清空缓存",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
         catch (Exception exception)
         {

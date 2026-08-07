@@ -35,7 +35,7 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <Button x:Name="SpeechButton" Grid.Column="0" Width="28" Height="24"
-                        Content="🔊" IsEnabled="False" ToolTip="朗读原文将在 M4 提供" />
+                        Content="🔊" ToolTip="朗读原文" Click="SpeechButton_OnClick" />
                 <Button x:Name="StarButton" Grid.Column="1" Width="28" Height="24" Margin="4,0,0,0"
                         Content="☆" ToolTip="收藏" Click="StarButton_OnClick" />
                 <Button x:Name="CopyButton" Grid.Column="2" Width="56" Height="24" Margin="4,0,0,0"

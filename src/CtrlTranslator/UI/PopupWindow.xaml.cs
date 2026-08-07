@@ -11,6 +11,7 @@ using System.Windows.Threading;
 using CtrlTranslator.Diagnostics;
 using CtrlTranslator.Interop;
 using CtrlTranslator.Settings;
+using CtrlTranslator.Speech;
 using CtrlTranslator.Translation;
 using Microsoft.Win32;
 using Color = System.Windows.Media.Color;
@@ -51,16 +52,28 @@ public partial class PopupWindow : Window
     private bool _isClosed;
     private int _boundsRefreshQueued;
 
-    public PopupWindow(string sourceText, string? appName, AppSettings settings)
+    private readonly SpeechService? _speechService;
+
+    public PopupWindow(string sourceText, string? appName, AppSettings settings, SpeechService? speechService = null)
     {
         InitializeComponent();
         _sourceText = sourceText;
         _appName = appName ?? "未知";
         _settings = settings;
+        _speechService = speechService;
         Width = Math.Clamp(settings.PopupMaxWidth, 260, 900);
         MaxHeight = Math.Clamp(settings.PopupMaxHeight, 180, 900);
         ContentViewer.FontSize = Math.Clamp(settings.PopupFontSize, 10, 24);
         ApplyTheme();
+        InitializeSpeechButton();
+        if (_speechService is not null)
+        {
+            _speechService.SpeakCompleted += SpeechService_OnSpeakCompleted;
+        }
+
+        // 系统深浅色切换时，连当前已打开的浮窗也一起换色。
+        // SystemEvents 是静态事件，持有强引用，必须在 OnClosed 里解绑，否则浮窗会泄漏。
+        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
         _mouseHook = new LowLevelMouseHook(Dispatcher);
         _mouseHook.ClickedOutside += MouseHook_OnClickedOutside;
@@ -210,6 +223,15 @@ public partial class PopupWindow : Window
     {
         _isClosed = true;
         _loadingTimer.Stop();
+        SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+
+        // SPEC §8：浮窗关闭时必须停止朗读，否则关了窗还在念。
+        if (_speechService is not null)
+        {
+            _speechService.SpeakCompleted -= SpeechService_OnSpeakCompleted;
+            _speechService.Stop();
+        }
+
         _mouseHook.ClickedOutside -= MouseHook_OnClickedOutside;
         _mouseHook.Dispose();
         SourceInitialized -= OnSourceInitialized;
@@ -367,9 +389,73 @@ public partial class PopupWindow : Window
     {
         LoadingPanel.Visibility = isLoading ? Visibility.Visible : Visibility.Collapsed;
         ContentViewer.Visibility = isLoading ? Visibility.Collapsed : Visibility.Visible;
-        SpeechButton.IsEnabled = false;
+        // 朗读的是原文，翻译还没回来时原文也已经拿到了；但按 §4.4 的规定，
+        // 加载期间工具条统一置灰，加载结束后再按语音是否可用决定。
+        SpeechButton.IsEnabled = !isLoading && _speechService?.IsAvailable == true;
         StarButton.IsEnabled = !isLoading && _result?.RecordId is not null;
         CopyButton.IsEnabled = !isLoading && _result is not null;
+    }
+
+    /// <summary>
+    /// 初始化朗读按钮。无可用语音时置灰，并把原因写进悬停提示（SPEC §8）。
+    /// </summary>
+    private void InitializeSpeechButton()
+    {
+        if (_speechService?.IsAvailable == true)
+        {
+            SpeechButton.ToolTip = "朗读原文";
+            return;
+        }
+
+        SpeechButton.IsEnabled = false;
+        SpeechButton.ToolTip = _speechService?.UnavailableReason
+            ?? "系统里没有安装可用的语音包。可到 Windows 设置 → 时间和语言 → 语音 → 添加语音 安装。";
+    }
+
+    private void SpeechButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_speechService?.IsAvailable != true)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_speechService.IsSpeaking)
+            {
+                _speechService.Stop();
+                UpdateSpeechButtonState(speaking: false);
+                return;
+            }
+
+            if (_speechService.Speak(_sourceText))
+            {
+                UpdateSpeechButtonState(speaking: true);
+            }
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("浮窗", "朗读操作失败。", exception);
+            UpdateSpeechButtonState(speaking: false);
+        }
+    }
+
+    private void UpdateSpeechButtonState(bool speaking)
+    {
+        SpeechButton.Content = speaking ? "⏹" : "🔊";
+        SpeechButton.ToolTip = speaking ? "停止朗读" : "朗读原文";
+    }
+
+    private void SpeechService_OnSpeakCompleted(object? sender, EventArgs e)
+    {
+        // 朗读线程回调，必须切回 UI 线程改按钮。
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (!_isClosed)
+            {
+                UpdateSpeechButtonState(speaking: false);
+            }
+        }));
     }
 
     private void RenderResult(string text, bool isWord)
@@ -499,6 +585,34 @@ public partial class PopupWindow : Window
         }
 
         NoticeBorder.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>
+    /// 系统偏好变化（含深浅色切换）时重新上色。回调在别的线程，必须切回 UI 线程。
+    /// </summary>
+    private void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
+    {
+        if (e.Category is not (UserPreferenceCategory.General or UserPreferenceCategory.Color))
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_isClosed)
+            {
+                return;
+            }
+
+            try
+            {
+                ApplyTheme();
+            }
+            catch (Exception exception)
+            {
+                Logger.Error("浮窗", "系统主题变化时重新上色失败。", exception);
+            }
+        }));
     }
 
     private void ApplyTheme()

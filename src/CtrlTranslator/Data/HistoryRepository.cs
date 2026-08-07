@@ -203,11 +203,32 @@ public sealed class HistoryRepository
         await transaction.CommitAsync(cancellationToken);
     }
 
-    public async Task ClearAllAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// 统计记录条数。SPEC §7.4 规定清空操作前必须告诉用户会删多少、保留多少。
+    /// </summary>
+    public async Task<(int NonStarred, int Starred)> CountAsync(CancellationToken cancellationToken)
     {
-        await ExecuteDeleteAsync("DELETE FROM translations;", cancellationToken);
+        await using SqliteConnection connection = _database.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT SUM(CASE WHEN starred = 0 THEN 1 ELSE 0 END), "
+            + "SUM(CASE WHEN starred = 1 THEN 1 ELSE 0 END) FROM translations;";
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return (0, 0);
+        }
+
+        int nonStarred = reader.IsDBNull(0) ? 0 : reader.GetInt32(0);
+        int starred = reader.IsDBNull(1) ? 0 : reader.GetInt32(1);
+        return (nonStarred, starred);
     }
 
+    /// <summary>
+    /// 只删除未收藏的记录。SPEC §7.4：星标收藏是用户攒的生词本，任何清理操作都不得删除。
+    /// v1.0 刻意不提供批量删除收藏的入口，收藏只能在主窗口逐条右键删除。
+    /// </summary>
     public async Task ClearNonStarredAsync(CancellationToken cancellationToken)
     {
         await ExecuteDeleteAsync("DELETE FROM translations WHERE starred = 0;", cancellationToken);
