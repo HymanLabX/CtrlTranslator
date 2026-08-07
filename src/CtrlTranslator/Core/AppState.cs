@@ -12,13 +12,23 @@ public sealed class AppState
     private static readonly long DebounceTicks = Stopwatch.Frequency / 2;
 
     private readonly AppSettings _settings;
-    private readonly HashSet<string> _blacklist;
+    private HashSet<string> _blacklist;
     private long _lastTriggerTicks;
 
     public AppState(AppSettings settings)
     {
         _settings = settings;
-        _blacklist = settings.AppBlacklist
+        _blacklist = CreateBlacklist(settings.AppBlacklist);
+    }
+
+    public void RefreshBlacklist()
+    {
+        _blacklist = CreateBlacklist(_settings.AppBlacklist);
+    }
+
+    private static HashSet<string> CreateBlacklist(IEnumerable<string> names)
+    {
+        return names
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Select(NormalizeProcessName)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);

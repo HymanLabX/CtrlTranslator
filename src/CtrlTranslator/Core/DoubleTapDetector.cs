@@ -17,6 +17,8 @@ public sealed class DoubleTapDetector
     private long _currentPressTicks;
     private bool _pollutedByOtherKey;
 
+    public bool LastEventWasValidTap { get; private set; }
+
     public DoubleTapDetector(string triggerKey, int doubleTapIntervalMs, int maxKeyHoldMs)
     {
         _triggerKey = ParseTriggerKey(triggerKey);
@@ -29,6 +31,7 @@ public sealed class DoubleTapDetector
     /// </summary>
     public bool ProcessKeyEvent(uint virtualKeyCode, bool isKeyDown, bool isKeyUp, long nowTicks)
     {
+        LastEventWasValidTap = false;
         bool isTriggerKey = IsTriggerKey(virtualKeyCode);
 
         if (isKeyDown)
@@ -68,6 +71,8 @@ public sealed class DoubleTapDetector
             _lastTapReleaseTicks = 0;
             return false;
         }
+
+        LastEventWasValidTap = true;
 
         long intervalTicks = nowTicks - _lastTapReleaseTicks;
         if (_lastTapReleaseTicks != 0

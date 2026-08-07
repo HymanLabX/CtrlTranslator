@@ -11,6 +11,8 @@ public sealed class AppSettings
 
     public string BaseUrl { get; set; } = string.Empty;
 
+    public string ProviderPreset { get; set; } = "自定义";
+
     public string ApiKeyProtected { get; set; } = string.Empty;
 
     [System.Text.Json.Serialization.JsonIgnore]
@@ -77,6 +79,7 @@ public sealed class AppSettings
     {
         Modes ??= [];
         AppBlacklist ??= [];
+        ProviderPreset ??= "自定义";
         ExtraRequestBody ??= DefaultExtraRequestBody;
 
         foreach (TranslationMode builtIn in BuiltInModes.CreateDefaults())

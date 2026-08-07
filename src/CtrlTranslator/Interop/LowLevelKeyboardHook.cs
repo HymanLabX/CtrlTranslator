@@ -30,6 +30,8 @@ public sealed class LowLevelKeyboardHook : IDisposable
 
     public event EventHandler? DoubleTapped;
 
+    public event EventHandler? ValidTapped;
+
     public event EventHandler? EscapePressed;
 
     public bool IsInstalled => _keyboardHookHandle != nint.Zero;
@@ -139,7 +141,17 @@ public sealed class LowLevelKeyboardHook : IDisposable
                         _dispatcher.BeginInvoke(new Action(RaiseEscapePressed), DispatcherPriority.Input);
                     }
 
-                    if (_detector.ProcessKeyEvent(data.VirtualKeyCode, isKeyDown, isKeyUp, nowTicks))
+                    bool doubleTapped = _detector.ProcessKeyEvent(
+                        data.VirtualKeyCode,
+                        isKeyDown,
+                        isKeyUp,
+                        nowTicks);
+                    if (_detector.LastEventWasValidTap)
+                    {
+                        _dispatcher.BeginInvoke(new Action(RaiseValidTapped), DispatcherPriority.Input);
+                    }
+
+                    if (doubleTapped)
                     {
                         _dispatcher.BeginInvoke(new Action(RaiseDoubleTapped), DispatcherPriority.Input);
                     }
@@ -182,6 +194,11 @@ public sealed class LowLevelKeyboardHook : IDisposable
     private void RaiseDoubleTapped()
     {
         DoubleTapped?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RaiseValidTapped()
+    {
+        ValidTapped?.Invoke(this, EventArgs.Empty);
     }
 
     private void RaiseEscapePressed()

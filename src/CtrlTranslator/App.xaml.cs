@@ -34,7 +34,9 @@ public partial class App : System.Windows.Application
     private LowLevelKeyboardHook? _keyboardHook;
     private SettingsStore? _settingsStore;
     private TranslationService? _translationService;
+    private HistoryRepository? _historyRepository;
     private PopupWindow? _popupWindow;
+    private SettingsWindow? _settingsWindow;
     private bool _loggerInitialized;
     private int _unhandledExceptionReported;
 
@@ -66,6 +68,7 @@ public partial class App : System.Windows.Application
             Logger.SetApiKey(settings.ApiKey);
 
             _trayIcon = new TrayIconController(settings, settingsStore);
+            _trayIcon.SettingsRequested += TrayIcon_OnSettingsRequested;
             if (!string.IsNullOrWhiteSpace(settingsStore.LastWarning))
             {
                 System.Windows.MessageBox.Show(
@@ -85,20 +88,14 @@ public partial class App : System.Windows.Application
                 Logger.Error("数据库", "初始化历史数据库失败，翻译功能将继续运行。", exception);
             }
 
+            _historyRepository = new HistoryRepository(database);
             _translationService = new TranslationService(
                 () => _settings ?? settings,
-                new HistoryRepository(database));
+                _historyRepository);
 
             _appState = new AppState(settings);
             _textCapture = new TextCapture(Dispatcher);
-            DoubleTapDetector detector = new(
-                settings.TriggerKey,
-                settings.DoubleTapIntervalMs,
-                settings.MaxKeyHoldMs);
-            _keyboardHook = new LowLevelKeyboardHook(Dispatcher, detector);
-            _keyboardHook.DoubleTapped += OnDoubleTapped;
-            _keyboardHook.EscapePressed += OnEscapePressed;
-            _keyboardHook.Install();
+            InstallKeyboardHook(settings);
 
             Logger.Info("应用", "CtrlTranslator 已启动，托盘图标已显示。");
         }
@@ -121,14 +118,9 @@ public partial class App : System.Windows.Application
         try
         {
             _popupWindow?.Close();
+            _settingsWindow?.Close();
             _translationService?.Dispose();
-
-            if (_keyboardHook is not null)
-            {
-                _keyboardHook.DoubleTapped -= OnDoubleTapped;
-                _keyboardHook.EscapePressed -= OnEscapePressed;
-                _keyboardHook.Dispose();
-            }
+            DisposeKeyboardHook();
         }
         catch (Exception exception)
         {
@@ -147,6 +139,11 @@ public partial class App : System.Windows.Application
 
         try
         {
+            if (_trayIcon is not null)
+            {
+                _trayIcon.SettingsRequested -= TrayIcon_OnSettingsRequested;
+            }
+
             _trayIcon?.Dispose();
         }
         catch (Exception exception)
@@ -286,6 +283,7 @@ public partial class App : System.Windows.Application
     {
         try
         {
+            _settingsWindow?.RecordDoubleTap();
             AppState? appState = _appState;
             TextCapture? textCapture = _textCapture;
             if (appState is null || textCapture is null)
@@ -503,7 +501,7 @@ public partial class App : System.Windows.Application
             switch (e.Action)
             {
                 case ErrorAction.Settings:
-                    _trayIcon?.OpenTemporaryApiSettings();
+                    ShowSettingsWindow(focusExtraRequestBody: false);
                     break;
                 case ErrorAction.Retry when sender is PopupWindow retryPopup:
                     _ = StartTranslationAsync(retryPopup.SourceText, retryPopup.AppName);
@@ -672,6 +670,146 @@ public partial class App : System.Windows.Application
     {
         // M3 接入设置界面前，此值由启动时读取的 settings.json 提供。
         return Math.Clamp(_settings?.ClipboardWaitMs ?? 300, 100, 1000);
+    }
+
+    private void TrayIcon_OnSettingsRequested(object? sender, EventArgs e)
+    {
+        ShowSettingsWindow(focusExtraRequestBody: false);
+    }
+
+    private void ShowSettingsWindow(bool focusExtraRequestBody)
+    {
+        try
+        {
+            if (_settings is null || _settingsStore is null || _historyRepository is null)
+            {
+                Logger.Error("设置", "用户打开设置窗口，但设置或历史服务尚未初始化。");
+                System.Windows.MessageBox.Show(
+                    "设置窗口还没有准备好，请退出程序后重新打开再试。",
+                    "CtrlTranslator",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                return;
+            }
+
+            if (_settingsWindow is null)
+            {
+                _settingsWindow = new SettingsWindow(
+                    _settings,
+                    _settingsStore,
+                    _historyRepository,
+                    OnSettingsChanged);
+                _settingsWindow.Closed += SettingsWindow_OnClosed;
+            }
+
+            if (_settingsWindow.WindowState == WindowState.Minimized)
+            {
+                _settingsWindow.WindowState = WindowState.Normal;
+            }
+
+            _settingsWindow.Show();
+            _settingsWindow.Activate();
+            _settingsWindow.ShowTranslationService(focusExtraRequestBody);
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("设置", "打开设置窗口失败。", exception);
+            System.Windows.MessageBox.Show(
+                "设置窗口没有打开成功，详情已记录到日志。请稍后再试。",
+                "CtrlTranslator",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private void SettingsWindow_OnClosed(object? sender, EventArgs e)
+    {
+        if (sender is SettingsWindow window)
+        {
+            window.Closed -= SettingsWindow_OnClosed;
+            if (ReferenceEquals(_settingsWindow, window))
+            {
+                _settingsWindow = null;
+            }
+        }
+    }
+
+    private void OnSettingsChanged(SettingsChangeKind changeKind)
+    {
+        _appState?.RefreshBlacklist();
+        _trayIcon?.RefreshFromSettings();
+        if (changeKind == SettingsChangeKind.KeyboardHook)
+        {
+            ReinstallKeyboardHook();
+        }
+    }
+
+    private void InstallKeyboardHook(AppSettings settings)
+    {
+        DoubleTapDetector detector = new(
+            settings.TriggerKey,
+            settings.DoubleTapIntervalMs,
+            settings.MaxKeyHoldMs);
+        var keyboardHook = new LowLevelKeyboardHook(Dispatcher, detector);
+        keyboardHook.ValidTapped += OnValidTapped;
+        keyboardHook.DoubleTapped += OnDoubleTapped;
+        keyboardHook.EscapePressed += OnEscapePressed;
+        try
+        {
+            keyboardHook.Install();
+            _keyboardHook = keyboardHook;
+        }
+        catch
+        {
+            keyboardHook.ValidTapped -= OnValidTapped;
+            keyboardHook.DoubleTapped -= OnDoubleTapped;
+            keyboardHook.EscapePressed -= OnEscapePressed;
+            keyboardHook.Dispose();
+            throw;
+        }
+    }
+
+    private void DisposeKeyboardHook()
+    {
+        if (_keyboardHook is null)
+        {
+            return;
+        }
+
+        LowLevelKeyboardHook keyboardHook = _keyboardHook;
+        _keyboardHook = null;
+        keyboardHook.ValidTapped -= OnValidTapped;
+        keyboardHook.DoubleTapped -= OnDoubleTapped;
+        keyboardHook.EscapePressed -= OnEscapePressed;
+        keyboardHook.Dispose();
+    }
+
+    private void ReinstallKeyboardHook()
+    {
+        try
+        {
+            AppSettings settings = _settings
+                ?? throw new InvalidOperationException("设置尚未初始化。");
+            DisposeKeyboardHook();
+            InstallKeyboardHook(settings);
+            Logger.Info(
+                "键盘钩子",
+                $"触发设置已即时生效：{settings.TriggerKey}，双击间隔 {settings.DoubleTapIntervalMs}ms。" );
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("键盘钩子", "应用新触发设置时重装键盘钩子失败。", exception);
+            System.Windows.MessageBox.Show(
+                "新的触发设置已保存，但按键监听没有重新启动成功。请退出 CtrlTranslator 后重新打开；如果仍失败，请检查安全软件是否拦截。",
+                "CtrlTranslator",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private void OnValidTapped(object? sender, EventArgs e)
+    {
+        _settingsWindow?.RecordValidTap();
     }
 
     private bool IsThinkingDisabled()
