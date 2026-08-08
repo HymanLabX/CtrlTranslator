@@ -43,12 +43,23 @@ public sealed class SettingsStore
             bool extraRequestBodyMissing = !ContainsProperty(json, nameof(AppSettings.ExtraRequestBody));
             AppSettings settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions)
                 ?? throw new JsonException("配置文件内容为空。");
+
+            // Normalize 会就地把过期的内置提示词刷成最新版，所以必须在调用前记下是否过期，
+            // 否则调用后再比较永远是"已最新"，改动就写不回磁盘。
+            bool promptsOutdated = settings.PromptVersion < AppSettings.CurrentPromptVersion;
             settings.Normalize();
+            if (promptsOutdated)
+            {
+                Logger.Info(
+                    "设置",
+                    $"内置模式提示词已升级到第 {AppSettings.CurrentPromptVersion} 版。");
+            }
+
             bool timeoutsAdjusted = AdjustLegacyTimeouts(settings);
             DecryptApiKey(settings);
 
             // 老配置没有此字段时立即补写，空字符串则视为用户的明确选择并原样保留。
-            if ((extraRequestBodyMissing || timeoutsAdjusted)
+            if ((extraRequestBodyMissing || timeoutsAdjusted || promptsOutdated)
                 && !TrySave(settings, out string? saveError))
             {
                 LastWarning = saveError;

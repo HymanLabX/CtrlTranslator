@@ -121,6 +121,20 @@ bool  _pollutedByOtherKey    // 本次按下期间是否出现了其他键
 
 判定结果作为一个布尔量传给提示词构建器，见 §5.3。
 
+> ⚠️ **这个判定是唯一的判定者，模型不得自行判断（已踩坑）**
+>
+> 词典格式**只能**由 `[请按词典条目格式输出]` 这个标记触发，标记由代码按上面的词数规则添加。
+>
+> 提示词里**绝不允许**出现「若输入是 1-3 个单词**或短语**」「不构成完整句子时」
+> 这类让模型自己判断的措辞。曾经这么写过，后果是：
+> 划取 `demonstrating progressive loop stabilization`（4 词，超过阈值，代码判定为句子、
+> 没加标记），模型看到"或短语"就自作主张按词典格式输出了音标 + 词性 + 两个候选释义。
+> 用户要的只是一句译文。
+>
+> 同时，提示词必须**正面**写清楚：划取的常常是文档里的片段（短语、动名词结构、从句、半句话），
+> 这种情况照样只给一句译文，不注音标、不标词性、不用「；」罗列多个候选。
+> 只删掉"或短语"是不够的——不写这条，模型仍会倾向于对不完整的片段做语法分析。
+
 ---
 
 ## 4. 浮窗（PopupWindow）
@@ -340,6 +354,23 @@ SizeToContent      = Height（宽度固定，高度自适应，但受 PopupMaxHe
 模式在设置中管理，每个模式有 `Id`（不可改）、`Name`、`SystemPromptTemplate`。
 内置模式可编辑但不可删除，并提供「恢复默认」按钮。
 
+> ⚠️ **提示词是持久化的，改代码对老用户不生效（已踩坑）**
+>
+> `Modes` 整个列表（含 `SystemPromptTemplate`）会被序列化进 `settings.json`。
+> `Normalize()` 原先只按 `Id` 补齐缺失的内置模式，**不会更新已存在模式的提示词**——
+> 也就是说改了 `BuiltInModes.cs` 里的提示词，已经用过软件的人还是跑旧提示词。
+>
+> 机制：`AppSettings.CurrentPromptVersion` + 配置里的 `PromptVersion`。
+> 载入时若 `PromptVersion < CurrentPromptVersion`，把所有内置模式的
+> `SystemPromptTemplate` 覆盖为代码里的最新版，然后写回配置文件。
+> 自定义模式（`Id` 不在内置清单里）不受影响。
+>
+> **凡是改动 `BuiltInModes.cs` 里的提示词文字，必须同时把 `CurrentPromptVersion` 加一。**
+> 忘了加，改动就是死的；而且缓存 key 也不会失效（见 §6.3），双重不生效。
+>
+> `PromptVersion` 属性**不能写默认值初始化器**。System.Text.Json 在 JSON 缺字段时
+> 会保留对象的初始值，写了初始值等于老配置一载入就"已是最新版"，迁移永远不触发。
+
 #### 模式 1 · `auto` —— 通用（默认选中）
 
 ```
@@ -501,8 +532,17 @@ CREATE INDEX IF NOT EXISTS idx_created   ON translations(created_at DESC);
 
 ### 6.3 缓存规则
 
-`cache_key = SHA256(source_text + "" + target_lang + "" + mode_id + "" + model)`
+`cache_key = SHA256(source_text + "" + target_lang + "" + mode_id + "" + model + prompt_version)`
 取十六进制小写字符串。
+
+> ⚠️ **`prompt_version` 必须参与 key（已踩坑）**
+>
+> 提示词一改，同一段原文该出的译文就变了。key 里不带版本号的话，
+> 改完提示词再去划同一句话，命中的还是旧缓存里的旧格式结果，
+> 看上去就像"改动根本没生效"——这个假象已经真实误导过一次排查。
+>
+> 版本号取 `AppSettings.CurrentPromptVersion`：提示词版本一加一，全部旧缓存自动失效。
+> 旧记录不删除，只是不再被命中；历史记录和收藏完整保留。
 
 **查询**：翻译开始前先按 `cache_key` 查最新一条。命中则：
 

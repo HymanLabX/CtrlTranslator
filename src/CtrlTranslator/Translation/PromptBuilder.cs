@@ -11,7 +11,8 @@ internal sealed record BuiltPrompt(
 
 internal static class PromptBuilder
 {
-    private const string DictionaryMarker = "[请按词典条目格式输出]\n";
+    // 标记文字定义在 BuiltInModes，提示词里引用的是同一个常量，改一处即可。
+    private const string DictionaryMarker = BuiltInModes.DictionaryMarkerTag + "\n";
 
     public static BuiltPrompt Build(string text, AppSettings settings)
     {

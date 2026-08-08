@@ -9,6 +9,12 @@ public sealed class AppSettings
     public const int DefaultFirstTokenTimeoutSeconds = 10;
     public const string DefaultExtraRequestBody = "{\"thinking\": {\"type\": \"disabled\"}}";
 
+    /// <summary>
+    /// 内置模式提示词的版本号。<b>每次改动 <see cref="BuiltInModes"/> 里的提示词文字，必须把这个数字加一。</b>
+    /// 提示词会被序列化进 settings.json，光改代码对老用户不生效 —— 靠这个版本号触发覆盖。
+    /// </summary>
+    public const int CurrentPromptVersion = 2;
+
     public string BaseUrl { get; set; } = string.Empty;
 
     public string ProviderPreset { get; set; } = "自定义";
@@ -31,6 +37,13 @@ public sealed class AppSettings
     public string ExtraRequestBody { get; set; } = DefaultExtraRequestBody;
 
     public string CurrentModeId { get; set; } = "auto";
+
+    /// <summary>
+    /// 本配置里存的内置提示词属于哪一版。
+    /// 故意不给默认值：老配置里没有这个字段，反序列化后就是 0，从而被 <see cref="Normalize"/> 判定为过期并刷新。
+    /// 若在这里写了初始值，缺字段的老配置会保留初始值，迁移就永远不会触发。
+    /// </summary>
+    public int PromptVersion { get; set; }
 
     public List<TranslationMode> Modes { get; set; } = BuiltInModes.CreateDefaults();
 
@@ -82,12 +95,32 @@ public sealed class AppSettings
         ProviderPreset ??= "自定义";
         ExtraRequestBody ??= DefaultExtraRequestBody;
 
-        foreach (TranslationMode builtIn in BuiltInModes.CreateDefaults())
+        List<TranslationMode> builtIns = BuiltInModes.CreateDefaults();
+
+        foreach (TranslationMode builtIn in builtIns)
         {
             if (!Modes.Any(mode => string.Equals(mode.Id, builtIn.Id, StringComparison.Ordinal)))
             {
                 Modes.Add(builtIn);
             }
+        }
+
+        // 内置模式的提示词以代码为准：老配置里存的是旧版提示词，这里整体覆盖。
+        // 自定义模式（Id 不在内置清单里）不动。
+        if (PromptVersion < CurrentPromptVersion)
+        {
+            foreach (TranslationMode builtIn in builtIns)
+            {
+                TranslationMode? stored = Modes.FirstOrDefault(
+                    mode => string.Equals(mode.Id, builtIn.Id, StringComparison.Ordinal));
+                if (stored is not null)
+                {
+                    stored.SystemPromptTemplate = builtIn.SystemPromptTemplate;
+                    stored.IsBuiltIn = true;
+                }
+            }
+
+            PromptVersion = CurrentPromptVersion;
         }
 
         if (!Modes.Any(mode => string.Equals(mode.Id, CurrentModeId, StringComparison.Ordinal)))

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using CtrlTranslator.Data;
@@ -209,13 +210,17 @@ internal sealed class TranslationService : IDisposable
         }
     }
 
+    // 提示词版本必须参与缓存 key：提示词一改，同一段原文该出的译文就变了。
+    // 不带版本的话，改完提示词再划同一句话仍会命中旧缓存，看上去像"改动没生效"（已踩坑）。
+    // 老缓存不会被删，只是不再命中，历史记录和收藏都完整保留。
     private static string CreateCacheKey(
         string sourceText,
         string targetLanguage,
         string modeId,
         string model)
     {
-        string material = string.Join('\u0001', sourceText, targetLanguage, modeId, model);
+        string promptVersion = AppSettings.CurrentPromptVersion.ToString(CultureInfo.InvariantCulture);
+        string material = string.Join('\u0001', sourceText, targetLanguage, modeId, model, promptVersion);
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(material));
         return Convert.ToHexStringLower(hash);
     }
