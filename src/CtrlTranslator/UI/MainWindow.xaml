@@ -8,8 +8,6 @@
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
         <ui:SingleLineConverter x:Key="SingleLine" />
-        <ui:ModeNameConverter x:Key="ModeName" />
-        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
 
         <Style x:Key="SideNavToggle" TargetType="RadioButton">
             <Setter Property="MinHeight" Value="46" />
@@ -77,7 +75,7 @@
         </Style>
 
         <Style x:Key="HistoryItem" TargetType="ListBoxItem">
-            <Setter Property="MinHeight" Value="66" />
+            <Setter Property="MinHeight" Value="60" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Template">
@@ -92,7 +90,7 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <Border x:Name="AccentBar" Background="{DynamicResource Brush.Transparent}" />
-                                <ContentPresenter Grid.Column="1" Margin="16,13" />
+                                <ContentPresenter Grid.Column="1" Margin="16,10,10,10" />
                             </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -118,29 +116,41 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <StackPanel>
-                    <TextBlock Text="{Binding SourceText, Converter={StaticResource SingleLine}}"
-                               TextTrimming="CharacterEllipsis"
-                               FontSize="{DynamicResource Size.Body}"
-                               Foreground="{DynamicResource Brush.Text}" />
-                    <TextBlock Text="{Binding ResultText, Converter={StaticResource SingleLine}}"
-                               Margin="0,4,0,0" TextTrimming="CharacterEllipsis"
-                               FontSize="{DynamicResource Size.BodySmall}"
-                               Foreground="{DynamicResource Brush.TextSecondary}" />
-                </StackPanel>
-                <StackPanel Grid.Column="1" Margin="14,0,0,0" HorizontalAlignment="Right">
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                        <TextBlock Text="{Binding ModeId, Converter={StaticResource ModeName}}" FontSize="{DynamicResource Size.Caption}"
-                                   Foreground="{DynamicResource Brush.TextTertiary}" />
-                        <Path Margin="7,0,0,0" Width="12" Height="12" Stretch="Uniform"
-                              VerticalAlignment="Center" Data="{DynamicResource Icon.StarFilled}"
-                              Fill="{DynamicResource Brush.Text}" Stroke="{DynamicResource Brush.Text}"
-                              Visibility="{Binding Starred, Converter={StaticResource BoolToVisibility}}" />
-                    </StackPanel>
-                    <TextBlock Text="{Binding CreatedAt, StringFormat={}{0:MM-dd HH:mm}}"
-                               Margin="0,4,0,0" HorizontalAlignment="Right"
-                               FontSize="{DynamicResource Size.Caption}"
-                               Foreground="{DynamicResource Brush.TextTertiary}" />
+                <TextBlock Text="{Binding SourceText, Converter={StaticResource SingleLine}}"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           FontSize="{DynamicResource Size.Body}"
+                           Foreground="{DynamicResource Brush.Text}"
+                           ToolTip="{Binding SourceText}" />
+                <StackPanel Grid.Column="1" Margin="10,0,0,0" Orientation="Horizontal"
+                            HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button Width="36" Height="36" Padding="0" Style="{StaticResource Button.Icon}"
+                            AutomationProperties.Name="切换收藏状态"
+                            ToolTip="收藏 / 取消收藏" Click="ToggleStar_OnClick">
+                        <Path Width="16" Height="16" Stretch="Uniform" Data="{DynamicResource Icon.Star}"
+                              StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              StrokeLineJoin="Round">
+                            <Path.Style>
+                                <Style TargetType="Path">
+                                    <Setter Property="Stroke" Value="{DynamicResource Brush.TextSecondary}" />
+                                    <Setter Property="Fill" Value="{DynamicResource Brush.Transparent}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Starred}" Value="True">
+                                            <Setter Property="Stroke" Value="{DynamicResource Brush.Text}" />
+                                            <Setter Property="Fill" Value="{DynamicResource Brush.Text}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Path.Style>
+                        </Path>
+                    </Button>
+                    <Button Width="36" Height="36" Padding="0" Margin="4,0,0,0"
+                            Style="{StaticResource Button.Icon}"
+                            AutomationProperties.Name="删除这条记录"
+                            ToolTip="删除这条记录" Click="DeleteRecord_OnClick">
+                        <Path Width="16" Height="16" Stretch="Uniform" Data="{DynamicResource Icon.Trash}"
+                              Stroke="{DynamicResource Brush.TextSecondary}" StrokeThickness="1.5"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                    </Button>
                 </StackPanel>
             </Grid>
         </DataTemplate>
@@ -169,7 +179,7 @@
                     <Image Width="34" Height="34" VerticalAlignment="Center"
                            Source="pack://application:,,,/Assets/ctrltranslator.ico"
                            AutomationProperties.Name="CtrlTranslator 程序图标" />
-                    <TextBlock Margin="10,0,0,0" VerticalAlignment="Center"
+                    <TextBlock Margin="12,0,0,0" VerticalAlignment="Center"
                                FontFamily="{DynamicResource Font.Display}"
                                FontSize="{DynamicResource Size.Title}" FontWeight="SemiBold"
                                Text="CtrlTranslator" />
@@ -179,7 +189,7 @@
                     <RadioButton x:Name="SettingsTabButton" Style="{StaticResource SideNavToggle}"
                                  GroupName="PrimaryNavigation" Checked="SettingsTab_OnChecked">
                         <Grid>
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="30" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                             <Path Width="17" Height="17" Stretch="Uniform" Data="{DynamicResource Icon.Settings}"
                                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" StrokeThickness="1.5"
                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
@@ -191,7 +201,7 @@
                                  GroupName="PrimaryNavigation"
                                  IsChecked="True" Checked="HistoryTab_OnChecked">
                         <Grid>
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="30" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                             <Path Width="17" Height="17" Stretch="Uniform" Data="{DynamicResource Icon.History}"
                                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
                                   StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
@@ -208,64 +218,24 @@
         <Grid x:Name="HistoryContent" Margin="34,28,34,32">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <DockPanel Margin="0,0,0,20">
-                <Border DockPanel.Dock="Right" Padding="4" VerticalAlignment="Center"
-                        Background="{DynamicResource Brush.SurfaceSubtle}"
-                        BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
-                        CornerRadius="{DynamicResource Radius.Medium}">
-                    <StackPanel Orientation="Horizontal">
-                        <RadioButton x:Name="AllTabButton" GroupName="HistoryFilters"
-                                     Style="{StaticResource ContentFilterToggle}"
-                                     IsChecked="True" Checked="HistoryFilter_OnChecked" Content="全部记录" />
-                        <RadioButton x:Name="StarredTabButton" GroupName="HistoryFilters"
-                                     Style="{StaticResource ContentFilterToggle}"
-                                     Checked="HistoryFilter_OnChecked" Content="已收藏" />
-                    </StackPanel>
-                </Border>
-                <StackPanel>
-                    <TextBlock FontFamily="{DynamicResource Font.Display}"
-                               FontSize="{DynamicResource Size.Heading}" FontWeight="SemiBold"
-                               Text="翻译记录" />
-                    <TextBlock Margin="0,4,0,0" FontSize="{DynamicResource Size.Body}"
-                               Foreground="{DynamicResource Brush.TextSecondary}"
-                               Text="查看、搜索并管理最近的翻译" />
+            <Border Padding="4" Margin="0,0,0,22" HorizontalAlignment="Center"
+                    Background="{DynamicResource Brush.SurfaceSubtle}"
+                    BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
+                    CornerRadius="{DynamicResource Radius.Medium}">
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="AllTabButton" GroupName="HistoryFilters"
+                                 Style="{StaticResource ContentFilterToggle}"
+                                 IsChecked="True" Checked="HistoryFilter_OnChecked" Content="全部记录" />
+                    <RadioButton x:Name="StarredTabButton" GroupName="HistoryFilters"
+                                 Style="{StaticResource ContentFilterToggle}"
+                                 Checked="HistoryFilter_OnChecked" Content="已收藏" />
                 </StackPanel>
-            </DockPanel>
+            </Border>
 
-            <DockPanel Grid.Row="1" Margin="0,0,0,22">
-                <Button DockPanel.Dock="Right" Margin="14,0,0,0"
-                        Style="{StaticResource Button.Secondary}"
-                        Content="导出 CSV" Click="ExportButton_OnClick" />
-                <Grid>
-                    <TextBox x:Name="SearchBox" Padding="40,8,12,8"
-                             AutomationProperties.Name="搜索翻译历史"
-                             TextChanged="SearchBox_OnTextChanged" />
-                    <Path Width="16" Height="16" Margin="14,0,0,0" Stretch="Uniform"
-                          HorizontalAlignment="Left" VerticalAlignment="Center"
-                          IsHitTestVisible="False" Data="{DynamicResource Icon.Search}"
-                          Stroke="{DynamicResource Brush.TextTertiary}" StrokeThickness="1.5"
-                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
-                    <TextBlock Margin="41,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"
-                               Foreground="{DynamicResource Brush.TextTertiary}" Text="搜索原文或译文">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
-                                        <Setter Property="Visibility" Value="Visible" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </Grid>
-            </DockPanel>
-
-            <Grid Grid.Row="2">
+            <Grid Grid.Row="1">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="48*" />
                     <ColumnDefinition Width="22" />
@@ -282,17 +252,7 @@
                                  HorizontalContentAlignment="Stretch"
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                  SelectionChanged="HistoryGrid_OnSelectionChanged"
-                                 ScrollViewer.ScrollChanged="HistoryGrid_OnScrollChanged">
-                            <ListBox.ContextMenu>
-                                <ContextMenu>
-                                    <MenuItem Header="复制原文" Click="CopySource_OnClick" />
-                                    <MenuItem Header="复制译文" Click="CopyResult_OnClick" />
-                                    <Separator />
-                                    <MenuItem x:Name="StarMenuItem" Header="收藏 / 取消收藏" Click="ToggleStar_OnClick" />
-                                    <MenuItem Header="删除这条记录" Click="DeleteRecord_OnClick" />
-                                </ContextMenu>
-                            </ListBox.ContextMenu>
-                        </ListBox>
+                                 ScrollViewer.ScrollChanged="HistoryGrid_OnScrollChanged" />
                         <TextBlock x:Name="EmptyStateText" Visibility="Collapsed"
                                    HorizontalAlignment="Center" VerticalAlignment="Center"
                                    Margin="28" TextAlignment="Center" TextWrapping="Wrap"
@@ -312,7 +272,7 @@
                         <TextBlock HorizontalAlignment="Center" FontWeight="SemiBold" Text="选择一条记录查看详情" />
                         <TextBlock Margin="0,6,0,0" TextAlignment="Center" TextWrapping="Wrap"
                                    Foreground="{DynamicResource Brush.TextSecondary}"
-                                   Text="左侧会保留翻译原文和译文，选中后可在这里完整查看与复制。" />
+                                   Text="左侧只显示原文；选中后可在这里完整查看、复制原文和译文。" />
                     </StackPanel>
 
                     <Grid x:Name="DetailCards" Visibility="Collapsed">
