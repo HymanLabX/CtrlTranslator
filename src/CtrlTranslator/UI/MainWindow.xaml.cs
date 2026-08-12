@@ -200,8 +200,7 @@ public partial class MainWindow : Window
     private async void DeleteRecord_OnClick(object sender, RoutedEventArgs e)
     {
         TranslationRecord? record = RecordFromActionSource(sender);
-        if (record is null || MessageBox.Show(this, "确定删除这条翻译记录吗？", "删除记录",
-                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        if (record is null)
         {
             return;
         }

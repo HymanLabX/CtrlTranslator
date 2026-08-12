@@ -205,7 +205,7 @@
                                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
                                   StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                   StrokeLineJoin="Round" />
-                            <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="翻译记录"
+                            <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="翻译历史"
                                        Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
                         </Grid>
                     </RadioButton>
@@ -221,16 +221,16 @@
             </Grid.RowDefinitions>
 
             <Border Padding="4" Margin="0,0,0,22" HorizontalAlignment="Center"
-                    Background="{DynamicResource Brush.SurfaceSubtle}"
+                    Background="{DynamicResource Brush.SurfaceRaised}"
                     BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
                     CornerRadius="{DynamicResource Radius.Medium}">
                 <StackPanel Orientation="Horizontal">
                     <RadioButton x:Name="AllTabButton" GroupName="HistoryFilters"
                                  Style="{StaticResource ContentFilterToggle}"
-                                 IsChecked="True" Checked="HistoryFilter_OnChecked" Content="全部记录" />
+                                 IsChecked="True" Checked="HistoryFilter_OnChecked" Content="翻译历史" />
                     <RadioButton x:Name="StarredTabButton" GroupName="HistoryFilters"
                                  Style="{StaticResource ContentFilterToggle}"
-                                 Checked="HistoryFilter_OnChecked" Content="已收藏" />
+                                 Checked="HistoryFilter_OnChecked" Content="我的收藏" />
                 </StackPanel>
             </Border>
 
