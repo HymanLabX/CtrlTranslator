@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
@@ -14,8 +15,10 @@ public partial class OnboardingWindow : Window
     private readonly AppSettings _settings;
     private readonly SettingsStore _settingsStore;
     private readonly Action _settingsApplied;
-    private readonly Action<AppSettings> _diagnosticsRequested;
-    private readonly IReadOnlyList<ProviderPreset> _providers = ProviderPreset.CreateAll();
+    private readonly Func<ApiProfile, DiagnosticRunner> _diagnosticRunnerFactory;
+    private readonly IReadOnlyList<ProviderChoice> _providers =
+        ProviderPresets.All.Select(preset => new ProviderChoice(preset)).ToArray();
+    private readonly ObservableCollection<DiagnosticResult> _diagnostics = [];
     private CancellationTokenSource? _testCancellation;
     private int _step = 1;
     private bool _testSucceeded;
@@ -24,16 +27,17 @@ public partial class OnboardingWindow : Window
         AppSettings settings,
         SettingsStore settingsStore,
         Action settingsApplied,
-        Action<AppSettings> diagnosticsRequested)
+        Func<ApiProfile, DiagnosticRunner> diagnosticRunnerFactory)
     {
         InitializeComponent();
         _settings = settings;
         _settingsStore = settingsStore;
         _settingsApplied = settingsApplied;
-        _diagnosticsRequested = diagnosticsRequested;
+        _diagnosticRunnerFactory = diagnosticRunnerFactory;
+        DiagnosticsList.ItemsSource = _diagnostics;
         ProviderList.ItemsSource = _providers;
         ProviderList.SelectedIndex = Math.Max(0, _providers.ToList().FindIndex(item =>
-            string.Equals(item.Name, settings.ProviderPreset, StringComparison.Ordinal)));
+            string.Equals(item.Name, settings.CurrentProfile.ProviderPreset, StringComparison.Ordinal)));
         Closed += OnboardingWindow_OnClosed;
     }
 
@@ -45,13 +49,13 @@ public partial class OnboardingWindow : Window
 
     private void ProviderList_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (ProviderList.SelectedItem is not ProviderPreset provider)
+        if (ProviderList.SelectedItem is not ProviderChoice provider)
         {
             return;
         }
 
-        BaseUrlBox.Text = provider.BaseUrl;
-        ModelBox.Text = provider.Model;
+        BaseUrlBox.Text = provider.Preset.BaseUrl;
+        ModelBox.Text = provider.Preset.Model;
     }
 
     private void OpenProviderWebsite_OnClick(object sender, RoutedEventArgs e)
@@ -82,8 +86,10 @@ public partial class OnboardingWindow : Window
             }
 
             CredentialsStatusText.Text = "正在读取可用模型…";
-            IReadOnlyList<string> models = await OpenAiCompatibleClient.FetchModelsAsync(
-                baseUrl, apiKey, CancellationToken.None);
+            // 见 SettingsWindow 里同名调用的注释：首次连接某个服务商时的代理探测/DNS
+            // 解析可能在真正 await 之前同步耗时，扔进线程池避免卡住向导界面。
+            IReadOnlyList<string> models = await Task.Run(
+                () => OpenAiCompatibleClient.FetchModelsAsync(baseUrl, apiKey, CancellationToken.None));
             ModelBox.ItemsSource = models;
             if (models.Count > 0 && string.IsNullOrWhiteSpace(ModelBox.Text))
             {
@@ -147,16 +153,16 @@ public partial class OnboardingWindow : Window
         _testCancellation = new CancellationTokenSource();
         _testSucceeded = false;
         FinishButton.IsEnabled = false;
-        ReadyText.Visibility = Visibility.Collapsed;
+        ReadyPanel.Visibility = Visibility.Collapsed;
         TestFailureActions.Visibility = Visibility.Collapsed;
         TestResultText.Text = string.Empty;
+        _diagnostics.Clear();
         TestStatusText.Text = "正在连接并翻译 Hello, world.…";
 
         try
         {
             TryReadCredentials(out string baseUrl, out string apiKey, out string model);
-            AppSettings temporarySettings = CreateTemporarySettings(baseUrl, apiKey, model);
-            using OpenAiCompatibleClient client = new(() => temporarySettings);
+            using OpenAiCompatibleClient client = new();
             TranslationClientResult result = await client.TranslateAsync(
                 new TranslationRequest(
                     baseUrl,
@@ -168,12 +174,12 @@ public partial class OnboardingWindow : Window
                     128,
                     AppSettings.DefaultRequestTimeoutSeconds,
                     AppSettings.DefaultFirstTokenTimeoutSeconds,
-                    AppSettings.DefaultExtraRequestBody),
+                    SelectedPreset().ExtraRequestBody),
                 null,
                 _testCancellation.Token);
             TestStatusText.Text = $"连接成功 · 首字 {result.FirstTokenLatencyMilliseconds}ms · 总耗时 {result.TotalLatencyMilliseconds}ms";
             TestResultText.Text = result.Text;
-            ReadyText.Visibility = Visibility.Visible;
+            ReadyPanel.Visibility = Visibility.Visible;
             _testSucceeded = true;
             FinishButton.IsEnabled = true;
         }
@@ -192,19 +198,45 @@ public partial class OnboardingWindow : Window
 
     private void BackFromFailureButton_OnClick(object sender, RoutedEventArgs e) => ShowStep(3);
 
-    private void DiagnosticsButton_OnClick(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// 独立诊断窗口在 M5 已被移除，这里就地跑同一套 12 项检查并把结果列在向导里。
+    /// </summary>
+    private async void DiagnosticsButton_OnClick(object sender, RoutedEventArgs e)
     {
+        if (!TryReadCredentials(out string baseUrl, out string apiKey, out string model))
+        {
+            return;
+        }
+
+        _diagnostics.Clear();
+        DiagnosticsButton.IsEnabled = false;
+        DiagnosticsButton.Content = "诊断中…";
+
         try
         {
-            if (TryReadCredentials(out string baseUrl, out string apiKey, out string model))
-            {
-                _diagnosticsRequested(CreateTemporarySettings(baseUrl, apiKey, model));
-            }
+            DiagnosticRunner runner = _diagnosticRunnerFactory(BuildProfile(baseUrl, apiKey, model));
+            var progress = new Progress<DiagnosticResult>(_diagnostics.Add);
+            using CancellationTokenSource cancellation = new(TimeSpan.FromSeconds(90));
+            IReadOnlyList<DiagnosticResult> results = await runner.RunAsync(progress, cancellation.Token);
+            int failed = results.Count(result => result.Status == DiagnosticStatus.Failed);
+            TestStatusText.Text = failed > 0
+                ? $"诊断完成：有 {failed} 项没通过，看下面标 ✗ 的那一行。"
+                : "诊断完成：所有检查都通过了，可以再点一次「下一步」重试。";
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.Info("首次向导", "诊断已取消或超时。");
+            TestStatusText.Text = "诊断被中断或超时了。";
         }
         catch (Exception exception)
         {
-            Logger.Error("首次向导", "打开诊断窗口失败。", exception);
-            MessageBox.Show(this, "暂时无法打开诊断窗口，详情已写入日志。", "打开失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Logger.Error("首次向导", "运行诊断失败。", exception);
+            TestStatusText.Text = "诊断没有跑完，详情已记录到日志。";
+        }
+        finally
+        {
+            DiagnosticsButton.IsEnabled = true;
+            DiagnosticsButton.Content = "详细诊断";
         }
     }
 
@@ -220,18 +252,26 @@ public partial class OnboardingWindow : Window
             return;
         }
 
-        ProviderPreset provider = (ProviderPreset)ProviderList.SelectedItem;
-        _settings.ProviderPreset = provider.Name;
-        _settings.BaseUrl = baseUrl;
-        _settings.ApiKey = apiKey;
-        _settings.Model = model;
+        // 首个档案直接落在配置里已有的那个空白档案上，避免留下一个没人用的"默认服务商"。
+        ApiProfile profile = _settings.CurrentProfile;
+        ProviderPreset preset = SelectedPreset();
+        profile.Name = _settings.Profiles.Count == 1
+            ? preset.Name
+            : _settings.GenerateUniqueProfileName(preset.Name);
+        profile.ProviderPreset = preset.Name;
+        profile.BaseUrl = baseUrl;
+        profile.ApiKey = apiKey;
+        profile.Model = model;
+        profile.ExtraRequestBody = preset.ExtraRequestBody;
+        profile.ClearFailure();
+
         if (!_settingsStore.TrySave(_settings, out string? errorMessage))
         {
             MessageBox.Show(this, errorMessage ?? "设置没有保存成功，请稍后再试。", "保存失败", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
-        Logger.SetApiKey(_settings.ApiKey);
+        Logger.SetApiKeys(_settings.Profiles.Select(item => item.ApiKey));
         _settingsApplied();
         Close();
     }
@@ -248,6 +288,9 @@ public partial class OnboardingWindow : Window
         NextButton.Visibility = _step < 4 ? Visibility.Visible : Visibility.Collapsed;
         FinishButton.Visibility = _step == 4 ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    private ProviderPreset SelectedPreset() =>
+        (ProviderList.SelectedItem as ProviderChoice)?.Preset ?? ProviderPresets.Custom;
 
     private bool TryReadCredentials(out string baseUrl, out string apiKey, out string model)
     {
@@ -277,34 +320,35 @@ public partial class OnboardingWindow : Window
         return true;
     }
 
-    private static AppSettings CreateTemporarySettings(string baseUrl, string apiKey, string model) => new()
+    private ApiProfile BuildProfile(string baseUrl, string apiKey, string model)
     {
-        BaseUrl = baseUrl,
-        ApiKey = apiKey,
-        Model = model
-    };
+        ProviderPreset preset = SelectedPreset();
+        return new ApiProfile
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = preset.Name,
+            ProviderPreset = preset.Name,
+            BaseUrl = baseUrl,
+            ApiKey = apiKey,
+            Model = model,
+            ExtraRequestBody = preset.ExtraRequestBody
+        };
+    }
 
-    private sealed record ProviderPreset(
-        string Name,
-        string BaseUrl,
-        string Model,
-        string Description,
-        string KeyUrl)
+    /// <summary>
+    /// 列表显示用的包装。绑定需要一个 Visibility，而 Settings 层的 ProviderPreset
+    /// 是纯数据、不该认识 WPF 的类型。
+    /// </summary>
+    private sealed record ProviderChoice(ProviderPreset Preset)
     {
-        public Visibility KeyButtonVisibility => string.IsNullOrWhiteSpace(KeyUrl)
+        public string Name => Preset.Name;
+
+        public string Description => Preset.Description;
+
+        public string KeyUrl => Preset.KeyUrl;
+
+        public Visibility KeyButtonVisibility => string.IsNullOrWhiteSpace(Preset.KeyUrl)
             ? Visibility.Collapsed
             : Visibility.Visible;
-
-        public static IReadOnlyList<ProviderPreset> CreateAll() =>
-        [
-            new("DeepSeek", "https://api.deepseek.com/v1", "deepseek-v4-flash", "速度快，适合日常划词翻译", "https://platform.deepseek.com/api_keys"),
-            new("智谱 GLM", "https://open.bigmodel.cn/api/paas/v4", "glm-4-flash", "国内服务，提供快速模型", "https://open.bigmodel.cn/usercenter/apikeys"),
-            new("阿里通义", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-turbo", "阿里云百炼 OpenAI 兼容接口", "https://help.aliyun.com/zh/model-studio/get-api-key"),
-            new("月之暗面 Kimi", "https://api.moonshot.cn/v1", "moonshot-v1-8k", "适合通用文本翻译", "https://platform.moonshot.cn/console/api-keys"),
-            new("硅基流动", "https://api.siliconflow.cn/v1", "Qwen/Qwen2.5-7B-Instruct", "提供多种开源模型", "https://cloud.siliconflow.cn/account/ak"),
-            new("OpenRouter", "https://openrouter.ai/api/v1", "", "可从多个服务商和模型中选择", "https://openrouter.ai/docs/quickstart"),
-            new("本地 Ollama", "http://localhost:11434/v1", "qwen2.5:7b", "数据留在本机，无需 API Key", "https://ollama.com/download"),
-            new("自定义", "", "", "填写任意 OpenAI 兼容接口", "")
-        ];
     }
 }

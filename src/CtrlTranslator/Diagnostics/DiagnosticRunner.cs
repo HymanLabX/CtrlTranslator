@@ -35,19 +35,27 @@ public sealed record DiagnosticResult(
 }
 
 /// <summary>
-/// 按规格顺序执行十二项诊断，每完成一项就报告一次结果。
+/// 按规格顺序对<b>某一个服务商档案</b>执行十二项诊断，每完成一项就报告一次结果。
 /// </summary>
+/// <remarks>
+/// M5 把它从独立诊断窗口下放到了设置页里每个档案旁的「测试」按钮：入口从四步缩到一步，
+/// 而且多档案下"到底哪个挂了"变成一目了然。
+/// </remarks>
 public sealed class DiagnosticRunner
 {
+    private readonly ApiProfile _profile;
     private readonly AppSettings _settings;
     private readonly HistoryRepository _repository;
     private readonly Func<bool> _hookInstalledProvider;
 
     public DiagnosticRunner(
+        ApiProfile profile,
         AppSettings settings,
         HistoryRepository repository,
         Func<bool> hookInstalledProvider)
     {
+        // 用快照跑：测试期间用户可能还在设置页里继续敲字段，读到改了一半的值会得出莫名其妙的结论。
+        _profile = profile.Clone();
         _settings = settings;
         _repository = repository;
         _hookInstalledProvider = hookInstalledProvider;
@@ -64,9 +72,9 @@ public sealed class DiagnosticRunner
         await RunCheckAsync(1, "配置完整性", async token =>
         {
             await Task.CompletedTask;
-            if (string.IsNullOrWhiteSpace(_settings.BaseUrl)
-                || string.IsNullOrWhiteSpace(_settings.ApiKey)
-                || string.IsNullOrWhiteSpace(_settings.Model))
+            if (string.IsNullOrWhiteSpace(_profile.BaseUrl)
+                || string.IsNullOrWhiteSpace(_profile.ApiKey)
+                || string.IsNullOrWhiteSpace(_profile.Model))
             {
                 return Failed("服务地址、API Key 或模型名尚未填写完整。");
             }
@@ -77,7 +85,7 @@ public sealed class DiagnosticRunner
         await RunCheckAsync(2, "服务地址格式", async token =>
         {
             await Task.CompletedTask;
-            if (!Uri.TryCreate(_settings.BaseUrl, UriKind.Absolute, out serviceUri)
+            if (!Uri.TryCreate(_profile.BaseUrl, UriKind.Absolute, out serviceUri)
                 || serviceUri.Scheme is not ("http" or "https"))
             {
                 return Failed("服务地址必须以 http:// 或 https:// 开头。");
@@ -133,7 +141,7 @@ public sealed class DiagnosticRunner
         {
             EnsureApiConfiguration();
             HttpStatusCode status = await OpenAiCompatibleClient.ProbeModelsAsync(
-                _settings.BaseUrl, _settings.ApiKey, token);
+                _profile.BaseUrl, _profile.ApiKey, token);
             if (status == HttpStatusCode.NotFound)
             {
                 return Warning("服务商不提供 /models 接口，已跳过本项；下一项会直接验证模型。");
@@ -152,18 +160,18 @@ public sealed class DiagnosticRunner
         await RunCheckAsync(6, "模型可用性", async token =>
         {
             EnsureApiConfiguration();
-            using OpenAiCompatibleClient client = new(() => _settings);
+            using OpenAiCompatibleClient client = new();
             TranslationClientResult result = await client.TranslateAsync(
                 CreateRequest("只回复一个字：好", maxTokens: 1), null, token);
-            return Passed($"模型「{_settings.Model}」可用，返回“{Shorten(result.Text, 12)}”。");
+            return Passed($"模型「{_profile.Model}」可用，返回“{Shorten(result.Text, 12)}”。");
         });
 
         await RunCheckAsync(7, "翻译链路", async token =>
         {
             EnsureApiConfiguration();
-            using OpenAiCompatibleClient client = new(() => _settings);
+            using OpenAiCompatibleClient client = new();
             helloResult = await client.TranslateAsync(
-                CreateRequest("Hello, world!", Math.Min(_settings.MaxTokens, 128)), null, token);
+                CreateRequest("Hello, world!", Math.Min(_profile.MaxTokens, 128)), null, token);
             return Passed(
                 $"翻译成功：“{Shorten(helloResult.Text, 60)}”；首字 {helloResult.FirstTokenLatencyMilliseconds}ms，总耗时 {helloResult.TotalLatencyMilliseconds}ms。");
         });
@@ -177,7 +185,7 @@ public sealed class DiagnosticRunner
             }
 
             bool warning = ModelHeuristics.ShouldWarnAboutReasoningModel(
-                _settings.Model,
+                _profile.Model,
                 helloResult.SawReasoning,
                 helloResult.FirstTokenLatencyMilliseconds);
             return warning
@@ -258,13 +266,14 @@ public sealed class DiagnosticRunner
 
     public string BuildReport(IEnumerable<DiagnosticResult> results)
     {
-        string safeKey = RedactApiKey(_settings.ApiKey);
+        string safeKey = RedactApiKey(_profile.ApiKey);
         string header = $"""
             CtrlTranslator 诊断报告
             生成时间：{DateTime.Now:yyyy-MM-dd HH:mm:ss}
-            服务地址：{_settings.BaseUrl}
+            服务商档案：{_profile.Name}
+            服务地址：{_profile.BaseUrl}
             API Key：{safeKey}
-            模型：{_settings.Model}
+            模型：{_profile.Model}
 
             """;
         return header + string.Join(Environment.NewLine, results.Select(result =>
@@ -272,22 +281,22 @@ public sealed class DiagnosticRunner
     }
 
     private TranslationRequest CreateRequest(string text, int maxTokens) => new(
-        _settings.BaseUrl,
-        _settings.ApiKey,
-        _settings.Model,
+        _profile.BaseUrl,
+        _profile.ApiKey,
+        _profile.Model,
         "你是翻译诊断助手，只输出简短答案。",
         text,
-        _settings.Temperature,
+        _profile.Temperature,
         maxTokens,
-        _settings.RequestTimeoutSeconds,
-        _settings.FirstTokenTimeoutSeconds,
-        _settings.ExtraRequestBody);
+        _profile.RequestTimeoutSeconds,
+        _profile.FirstTokenTimeoutSeconds,
+        _profile.ExtraRequestBody);
 
     private void EnsureApiConfiguration()
     {
-        if (string.IsNullOrWhiteSpace(_settings.ApiKey)
-            || string.IsNullOrWhiteSpace(_settings.Model)
-            || !Uri.TryCreate(_settings.BaseUrl, UriKind.Absolute, out _))
+        if (string.IsNullOrWhiteSpace(_profile.ApiKey)
+            || string.IsNullOrWhiteSpace(_profile.Model)
+            || !Uri.TryCreate(_profile.BaseUrl, UriKind.Absolute, out _))
         {
             throw new InvalidOperationException("翻译服务配置尚未填写完整。");
         }

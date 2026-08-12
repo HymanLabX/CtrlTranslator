@@ -235,9 +235,8 @@ SizeToContent      = Height（宽度固定，高度自适应，但受 PopupMaxHe
 则一次性渲染；若超过该时间仍未完成，则**切换为逐块追加显示**，
 且窗口高度增长时不要跳动（用 `MinHeight` 锁住已达到的高度）。
 
-**主题**：跟随系统深/浅色（读注册表
-`HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme`），
-设置里可强制为浅色或深色。
+**主题**：只有一套暖纸色（见 `DESIGN.md` §2）。**不跟随系统深浅色，也没有深色模式**——
+M7 明确砍掉了，理由见 `DESIGN.md` §2 的说明。
 
 ### 4.5 词典模式的渲染
 
@@ -581,6 +580,12 @@ CREATE INDEX IF NOT EXISTS idx_created   ON translations(created_at DESC);
 设置窗口分五个页签。所有设置**改完即时生效**，无需重启（触发键与钩子相关的变更
 需要重装钩子，由代码自动完成）。
 
+> **M5 变更**：设置窗口已从横向页签改为**左侧导航 + 右侧卡片**，共六项：
+> 服务商档案 / 模型参数 / 翻译行为 / 触发方式 / 隐私与安全 / 系统。
+> 原「翻译服务」拆成前两项：连接信息（BaseUrl / Key / Model / 预设）归「服务商档案」，
+> Temperature、输出长度、超时、额外请求参数归「模型参数」，且**全部属于选中的那个档案**。
+> 下面各小节的字段与校验规则不变，只是所在位置变了。
+
 ### 7.1 页签「翻译服务」
 
 | 项 | 类型 | 默认值 |
@@ -663,7 +668,8 @@ CREATE INDEX IF NOT EXISTS idx_created   ON translations(created_at DESC);
 | 项 | 类型 | 默认值 |
 |---|---|---|
 | 开机自动启动 | 开关（写注册表 `HKCU\...\Run`） | 关 |
-| 界面主题 | 下拉框（跟随系统 / 浅色 / 深色） | 跟随系统 |
+| 自动检查新版本 | 开关（启动后 + 每 24 小时查一次 GitHub） | 开 |
+| 检查更新 | 按钮 | — |
 | 浮窗字号 | 数字 10–24 | 14 |
 | 浮窗最大宽度 | 数字 | 480 |
 | 浮窗最大高度 | 数字 | 400 |
@@ -768,8 +774,14 @@ CREATE INDEX IF NOT EXISTS idx_created   ON translations(created_at DESC);
 
 ## 10. 一键诊断
 
-设置页「翻译服务」中的按钮，点击后弹出诊断窗口，**逐项执行并实时显示结果**，
-每项显示 ✓ / ✗ / ⚠ + 耗时 + 说明文字。
+> **M5 变更**：独立的诊断窗口已删除，12 项检查逻辑原样保留。
+> 入口下放为「设置 → 服务商档案」里**每个档案旁边的「测试」按钮**，结果就地展开在卡片内；
+> 引导向导第 4 步失败时也会就地跑同一套检查。
+> 这么改是因为原来的入口有四步深（托盘 → 设置 → 翻译服务 → 一键诊断），实际没人会点；
+> 而多档案上线后，"到底哪个档案挂了"必须一眼可见。
+> 下表的检查项和判据完全不变，只是**针对被选中的那个档案**运行。
+
+每项显示 ✓ / ✗ / ⚠ + 耗时 + 说明文字，逐项执行并实时刷新。
 
 | # | 检查项 | 通过标准 |
 |---|---|---|
@@ -896,10 +908,21 @@ dotnet publish src/CtrlTranslator/CtrlTranslator.csproj `
 
 - **`PublishTrimmed` 必须为 false**（WPF 不支持裁剪）
 - SQLite 的原生库必须靠 `IncludeNativeLibrariesForSelfExtract` 打进单文件
-- 产物：`publish\CtrlTranslator.exe`，单文件，双击即可运行，无需安装 .NET
-- 在仓库根提供 `build.ps1`，内容就是上面这条命令 + 完成后用资源管理器打开 `publish` 目录
+- 中间产物：`publish\CtrlTranslator.exe`，单文件，双击即可运行，无需安装 .NET
+- 在仓库根提供 `build.ps1`，内容就是上面这条命令 + 编译 Inno 安装包 + 打开产物目录
 - exe 需带图标和文件版本信息（`ApplicationIcon`、`AssemblyVersion`、`FileVersion`、
   `Product = CtrlTranslator`）
+
+> **M6 变更：对外只发安装包。**
+> Release 资产固定为两个：`CtrlTranslator-Setup-<版本>.exe` 和 `SHA256SUMS.txt`。
+> 裸 exe 不再作为发布产物 —— 它没有安装记录可供覆盖，自我替换的动作在杀毒软件眼里
+> 几乎等同蠕虫；它仍然会被构建，因为它是安装包的输入，也用于本机验证打包产物。
+>
+> `SHA256SUMS.txt` **不是给人看的装饰**：程序内的自动更新靠它校验下载到的安装包，
+> 缺了它老版本会拒绝更新（这是有意的）。**发版时不得删除该资产。**
+>
+> 发版前必须同步修改 `csproj` 里的 `Version` / `AssemblyVersion` / `FileVersion`，
+> 否则装上新版后程序仍自认旧版本，会永远提示有更新。
 
 ### README.md 必须包含
 

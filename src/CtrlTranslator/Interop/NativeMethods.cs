@@ -111,6 +111,14 @@ internal static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern uint SendInput(uint inputCount, Input[] inputs, int inputSize);
 
+    /// <summary>
+    /// 释放 <c>Bitmap.GetHicon</c> 造出来的图标句柄。<c>Icon.FromHandle</c> 不接管所有权，
+    /// 不显式销毁就是一个跟进程同寿的 GDI 句柄泄漏。
+    /// </summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool DestroyIcon(nint iconHandle);
+
     [StructLayout(LayoutKind.Sequential)]
     internal readonly struct KeyboardLowLevelHookData
     {

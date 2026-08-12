@@ -78,6 +78,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <Grid x:Name="Toolbar" Grid.Row="0" Background="Transparent"
@@ -150,7 +151,13 @@
                                           IsToolBarVisible="False" />
             </Grid>
 
-            <Border x:Name="NoticeBorder" Grid.Row="3" Margin="0,12,0,0" Padding="12"
+            <!-- 降级提示：只占一行，平时折叠，不影响任何既有布局与拖动行为。 -->
+            <TextBlock x:Name="FallbackNoticeText" Grid.Row="3" Margin="0,10,0,0"
+                       Visibility="Collapsed" TextWrapping="Wrap"
+                       FontSize="{DynamicResource Size.Caption}"
+                       Foreground="{DynamicResource Brush.TextTertiary}" />
+
+            <Border x:Name="NoticeBorder" Grid.Row="4" Margin="0,12,0,0" Padding="12"
                     CornerRadius="{DynamicResource Radius.Medium}" Visibility="Collapsed">
                 <DockPanel LastChildFill="True">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">

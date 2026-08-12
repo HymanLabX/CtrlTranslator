@@ -28,8 +28,12 @@
 
 ## 2. 设计令牌
 
-全部定义在 `Themes/Tokens.Light.xaml` 与 `Themes/Tokens.Dark.xaml`，
-**键名两边必须完全一致**，切换主题时整体替换字典即可。
+全部定义在 `Themes/Tokens.Light.xaml`。
+
+> **只有一套主题（暖纸色），没有深色模式。**
+> 这是 M7 明确做的取舍：暖纸调本身就是为长时间阅读挑的，再维护一套语义等价的深色
+> 色阶意味着每加一个控件都要调两遍对比度。真需要深色时，重新出一份完整的深色令牌
+> （不是把浅色反过来），而不是临时补几个键。
 
 ### 2.1 颜色
 
@@ -41,26 +45,26 @@
 > ⚠️ 不要用网上流传的"绿豆沙护眼色" `#C7EDCC`，它饱和度过高、会压低文字对比度，
 > 长时间读反而更累。
 
-| 令牌键 | 浅色 | 深色 | 用途 |
-|---|---|---|---|
-| `Color.Bg` | `#F7F3EC` | `#15130F` | 窗口底（比 Surface 略深，做层次） |
-| `Color.Surface` | `#FBF8F3` | `#1B1917` | **浮窗**、卡片 |
-| `Color.SurfaceSubtle` | `#F2EDE4` | `#221F1B` | 输入框、只读区 |
-| `Color.Border` | `#E0D8CA` | `#302B25` | 常规边框、分隔线 |
-| `Color.BorderStrong` | `#CFC5B4` | `#453E35` | 输入框边框、**浮窗外框** |
-| `Color.Text` | `#1F1B16` | `#EDE7DE` | 正文（暖黑，不是纯黑） |
-| `Color.TextSecondary` | `#6E655A` | `#A79D91` | 次要说明、图标默认色 |
-| `Color.TextTertiary` | `#9A9086` | `#766D62` | 占位符、禁用态 |
-| `Color.Accent` | `#4F7DF3` | `#6C93F7` | 强调 |
-| `Color.AccentHover` | `#3D6AE0` | `#8AA9F9` | 强调悬停 |
-| `Color.AccentSubtle` | `#EFF4FE` | `#1E2739` | 强调色的浅底 |
-| `Color.Hover` | `#F4F4F5` | `#22262E` | 悬停覆盖层 |
-| `Color.Pressed` | `#E4E4E7` | `#2A2E37` | 按下覆盖层 |
-| `Color.Success` | `#16A34A` | `#4ADE80` | 诊断 ✓ |
-| `Color.Warning` | `#B45309` | `#FBBF24` | 警告文字 |
-| `Color.WarningBg` | `#FEF6E7` | `#2A2415` | 警告条底 |
-| `Color.Danger` | `#DC2626` | `#F87171` | 错误文字、诊断 ✗ |
-| `Color.DangerBg` | `#FEF0F0` | `#2A1A1A` | 错误条底 |
+| 令牌键 | 值 | 用途 |
+|---|---|---|
+| `Color.Bg` | `#F7F3EC` | 窗口底（比 Surface 略深，做层次） |
+| `Color.Surface` | `#FBF8F3` | **浮窗**、卡片 |
+| `Color.SurfaceSubtle` | `#F2EDE4` | 输入框、只读区 |
+| `Color.Border` | `#E0D8CA` | 常规边框、分隔线 |
+| `Color.BorderStrong` | `#CFC5B4` | 输入框边框、**浮窗外框** |
+| `Color.Text` | `#1F1B16` | 正文（暖黑，不是纯黑） |
+| `Color.TextSecondary` | `#6E655A` | 次要说明、图标默认色 |
+| `Color.TextTertiary` | `#9A9086` | 占位符、禁用态 |
+| `Color.Accent` | `#4F7DF3` | 强调 |
+| `Color.AccentHover` | `#3D6AE0` | 强调悬停 |
+| `Color.AccentSubtle` | `#EFF4FE` | 强调色的浅底 |
+| `Color.Hover` | `#F4F4F5` | 悬停覆盖层 |
+| `Color.Pressed` | `#E4E4E7` | 按下覆盖层 |
+| `Color.Success` | `#16A34A` | 诊断 ✓ |
+| `Color.Warning` | `#B45309` | 警告文字 |
+| `Color.WarningBg` | `#FEF6E7` | 警告条底 |
+| `Color.Danger` | `#DC2626` | 错误文字、诊断 ✗ |
+| `Color.DangerBg` | `#FEF0F0` | 错误条底 |
 
 每个颜色令牌都要同时提供 `SolidColorBrush` 版本，键名为 `Brush.Xxx`
 （例如 `Brush.Text`），XAML 里一律引用画笔而非颜色。
@@ -106,9 +110,7 @@
 
 ```xml
 <DropShadowEffect BlurRadius="24" ShadowDepth="4" Direction="270"
-                  Opacity="0.18" Color="#000000" />   <!-- 浅色 -->
-<DropShadowEffect BlurRadius="24" ShadowDepth="4" Direction="270"
-                  Opacity="0.50" Color="#000000" />   <!-- 深色 -->
+                  Opacity="0.18" Color="#000000" />
 ```
 
 浮窗外框用 **1.5px** `Brush.BorderStrong`（不是 1px 的 `Brush.Border`）。
@@ -254,29 +256,40 @@
 
 ### 5.2 设置窗口
 
-- 窗口尺寸 `760×560`，最小 `680×480`
-- 顶部标签栏按 §3.3 改成下划线式
-- 表单布局：左列标签（`BodySmall`、`TextSecondary`、右对齐、宽 120）+ 右列控件
-- 每个分组之间 24 间距，组内 12
-- 每项下方可选一行 `Caption` + `TextTertiary` 的说明文字
-- 底部固定操作条：右下角「取消」`Button.Secondary` + 「保存」`Button.Primary`，
-  上方 1px 分隔线
+> M5 起改为**左侧导航 + 右侧卡片**，不再是顶部标签页（§3.3 那套下划线标签只剩
+> 历史参考价值）。原因：六个分区横排太挤，而服务商档案列表需要垂直空间。
+
+- 窗口尺寸 `960×740`，最小 `820×580`
+- 左侧导航栏宽 176，`SurfaceSubtle` 底，右边 1px 分隔线；
+  导航项默认 `TextSecondary`，悬停 `Hover` 底，选中 `AccentSubtle` 底 + `Accent` 字 + SemiBold
+- 右侧内容区按主题分**卡片**：`Surface` 底、1px `Border`、圆角 8、内边距 18、卡片间距 14
+- 每张卡片顶部一行 SemiBold 标题；表单行左列标签宽 145 + 右列控件
+- 每项下方可选一行 `BodySmall` + `TextSecondary` 的说明文字
+- 底部固定状态条：左侧保存状态文字（成功 `Success` / 校验失败 `Danger`）+ 右侧「关闭」按钮，
+  上方 1px 分隔线。**设置是即时保存的，没有「保存」按钮**
 
 ### 5.3 主窗口（历史与收藏）
 
 - 窗口尺寸 `900×620`
 - 顶部：搜索框（带 `Icon.Search` 前缀，占满宽度）+ 右侧「导出 CSV」`Button.Secondary`
+- 「全部历史 / 我的收藏」做成**分段按钮**（两个 `RadioButton` 重写模板），
+  紧贴列表上方。**不要**用 TabControl 再把列表用边距顶到它的内容区上 —— 那样换字号或
+  DPI 就会错位（这是 v1.0 踩过的坑）
 - 下方左右分栏：左 55% 列表（按 §3.4），右 45% 详情
 - 详情区：原文块 + 译文块，中间 1px 分隔线，各自右上角一个复制图标按钮
-- 空状态：居中 `TextTertiary` 文字「还没有翻译记录。选中文字后双击 Ctrl 试试。」
+- 空状态：居中 `TextTertiary` 文字。三种空要给三种话 ——
+  没记录「还没有翻译记录。选中文字后双击 Ctrl 试试。」／
+  没收藏「还没有收藏。翻译出来后点浮窗上的 ☆ 就能存进这里。」／
+  搜不到「没有匹配的记录。换个关键词试试。」
 
-### 5.4 诊断窗口
+### 5.4 服务商测试结果（设置页内）
 
-- 每项一行：状态图标（✓ `Success` / ✗ `Danger` / ⚠ `Warning`）+ 项目名 + 右侧耗时（`TextTertiary`）
-- 未执行的项显示为 `TextTertiary` 的空心圆
-- 执行中的项显示旋转圆环
-- 失败项下方缩进显示原因（`BodySmall`、`Danger`）
-- 底部「复制诊断报告」`Button.Secondary`
+> M5 起诊断没有独立窗口，结果就地展开在「服务商档案」页的卡片里。
+
+- 每项一行：状态图标（✓ `Success` / ✗ `Danger` / ⚠ `Warning`）+ 项目名
+  + 说明文字（`BodySmall`、`TextSecondary`）+ 右侧耗时（`Caption`、`TextTertiary`）
+- 结果逐项实时追加，跑完在卡片顶部给一句总结
+- 卡片右上角「复制诊断报告」`Button.Secondary`，导出的文本里 API Key 必须脱敏
 
 ### 5.5 引导向导
 
@@ -317,23 +330,23 @@
 
 ```
 src/CtrlTranslator/Themes/
-├─ Tokens.Light.xaml      # 浅色令牌（Color + Brush + 尺寸）
-├─ Tokens.Dark.xaml       # 深色令牌，键名与浅色完全一致
+├─ Tokens.Light.xaml      # 设计令牌（Color + Brush + 尺寸）——唯一一套
 ├─ Icons.xaml             # 所有 Geometry 图标资源
 └─ Controls.xaml          # 所有控件样式，只引用令牌键，不写死值
 ```
 
-在 `App.xaml` 中合并；主题切换 = 运行时替换 `Tokens.*.xaml` 那一项，
-`Controls.xaml` 与 `Icons.xaml` 保持不动。
+在 `App.xaml` 中合并。
+
+> 文件名保留 `Tokens.Light` 而不是改成 `Tokens`：将来真要加深色时，
+> 直接并排放一个 `Tokens.Dark.xaml` 即可，不用再动所有引用。
 
 ### 7.2 硬性要求
 
 1. **`Controls.xaml` 里不许出现任何字面颜色值**，一律 `{DynamicResource Brush.Xxx}`
-   —— 用 `DynamicResource` 而不是 `StaticResource`，否则运行时换主题不会生效
+   —— 保持 `DynamicResource`：令牌是运行时查找的，将来加主题切换才不用返工
 2. **所有 `.cs` 文件里不许再有 `Color.FromRgb` / `Brushes.Xxx`**
-3. 主题切换必须**立即生效**，已打开的窗口全部跟着变（浮窗、设置、主窗口都要）
-4. 改完后 `dotnet build -c Release` **0 警告 0 错误**
-5. 现有全部功能与交互**保持不变**
+3. 改完后 `dotnet build -c Release` **0 警告 0 错误**
+4. 现有全部功能与交互**保持不变**
 
 ### 7.3 明确不要做的
 

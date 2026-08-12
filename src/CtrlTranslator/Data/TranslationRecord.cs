@@ -28,4 +28,12 @@ public sealed class TranslationRecord
     public long? LatencyMilliseconds { get; set; }
 
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>翻出这条译文的服务商档案名。老记录没有这一列，读出来是 null。</summary>
+    public string? ProfileName { get; set; }
+
+    /// <summary>服务商主动回报的 token 用量；拿不到就是 null（详见 TranslationClientResult 的说明）。</summary>
+    public long? PromptTokens { get; set; }
+
+    public long? CompletionTokens { get; set; }
 }

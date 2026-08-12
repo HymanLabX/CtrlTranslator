@@ -16,20 +16,26 @@ namespace CtrlTranslator.Translation;
 internal sealed class OpenAiCompatibleClient : ITranslationClient
 {
     private static readonly HttpClient SharedHttpClient = CreateHttpClient();
-    private readonly Func<AppSettings> _settingsProvider;
+    private readonly Func<ApiProfile?>? _warmupProfileProvider;
     private readonly CancellationTokenSource _warmupCancellation = new();
-    private readonly System.Threading.Timer _warmupTimer;
+    private readonly System.Threading.Timer? _warmupTimer;
     private int _isWarmingUp;
     private bool _disposed;
 
-    public OpenAiCompatibleClient(Func<AppSettings> settingsProvider)
+    /// <param name="warmupProfileProvider">
+    /// 传 null 表示这是一次性用途（诊断、连接测试），不启动后台预热定时器。
+    /// </param>
+    public OpenAiCompatibleClient(Func<ApiProfile?>? warmupProfileProvider = null)
     {
-        _settingsProvider = settingsProvider;
-        _warmupTimer = new System.Threading.Timer(
-            static state => ((OpenAiCompatibleClient)state!).StartWarmup(),
-            this,
-            TimeSpan.FromSeconds(3),
-            TimeSpan.FromMinutes(4));
+        _warmupProfileProvider = warmupProfileProvider;
+        if (warmupProfileProvider is not null)
+        {
+            _warmupTimer = new System.Threading.Timer(
+                static state => ((OpenAiCompatibleClient)state!).StartWarmup(),
+                this,
+                TimeSpan.FromSeconds(3),
+                TimeSpan.FromMinutes(4));
+        }
     }
 
     public async Task<TranslationClientResult> TranslateAsync(
@@ -62,6 +68,8 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
         long firstTokenLatency = 0;
         long? responseHeadersLatency = null;
         var sawReasoning = false;
+        long? promptTokens = null;
+        long? completionTokens = null;
         var resultBuilder = new StringBuilder();
 
         try
@@ -108,8 +116,10 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
                     continue;
                 }
 
-                ParseChunk(payload, out string delta, out bool chunkSawReasoning);
+                ParseChunk(payload, out string delta, out bool chunkSawReasoning, out ChunkUsage usage);
                 sawReasoning |= chunkSawReasoning;
+                promptTokens = usage.PromptTokens ?? promptTokens;
+                completionTokens = usage.CompletionTokens ?? completionTokens;
                 if (delta.Length == 0)
                 {
                     continue;
@@ -136,7 +146,9 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
                 resultBuilder.ToString(),
                 firstTokenLatency,
                 stopwatch.ElapsedMilliseconds,
-                sawReasoning);
+                sawReasoning,
+                promptTokens,
+                completionTokens);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -228,7 +240,7 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
         }
 
         _disposed = true;
-        _warmupTimer.Dispose();
+        _warmupTimer?.Dispose();
         _warmupCancellation.Cancel();
         _warmupCancellation.Dispose();
     }
@@ -238,7 +250,10 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
         var handler = new SocketsHttpHandler
         {
             PooledConnectionLifetime = TimeSpan.FromMinutes(10),
-            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5)
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+            // 不设上限的话，DNS 解析或代理探测卡住时连接会挂很久，
+            // 拖慢的不只是这一次请求，还会让人觉得整个界面在卡顿。
+            ConnectTimeout = TimeSpan.FromSeconds(10)
         };
         return new HttpClient(handler, disposeHandler: true)
         {
@@ -313,10 +328,18 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
         }
     }
 
-    private static void ParseChunk(string payload, out string delta, out bool sawReasoning)
+    private readonly record struct ChunkUsage(long? PromptTokens, long? CompletionTokens);
+
+    private static void ParseChunk(
+        string payload,
+        out string delta,
+        out bool sawReasoning,
+        out ChunkUsage usage)
     {
         using JsonDocument document = JsonDocument.Parse(payload);
         JsonElement root = document.RootElement;
+        usage = ReadUsage(root);
+
         if (!root.TryGetProperty("choices", out JsonElement choices)
             || choices.ValueKind != JsonValueKind.Array
             || choices.GetArrayLength() == 0
@@ -333,6 +356,30 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
             && content.ValueKind == JsonValueKind.String
                 ? content.GetString() ?? string.Empty
                 : string.Empty;
+    }
+
+    /// <summary>
+    /// 只读对方主动送来的 usage。多数服务商会在最后一个 chunk 里带上，没带就当没有 ——
+    /// 为了拿这个数字去加 <c>stream_options</c> 参数不值得，未知键可能让整次翻译 400。
+    /// </summary>
+    private static ChunkUsage ReadUsage(JsonElement root)
+    {
+        if (!root.TryGetProperty("usage", out JsonElement usage)
+            || usage.ValueKind != JsonValueKind.Object)
+        {
+            return default;
+        }
+
+        return new ChunkUsage(ReadTokenCount(usage, "prompt_tokens"), ReadTokenCount(usage, "completion_tokens"));
+    }
+
+    private static long? ReadTokenCount(JsonElement usage, string propertyName)
+    {
+        return usage.TryGetProperty(propertyName, out JsonElement value)
+            && value.ValueKind == JsonValueKind.Number
+            && value.TryGetInt64(out long count)
+                ? count
+                : null;
     }
 
     private static bool HasNonEmptyProperty(JsonElement element, string name)
@@ -356,25 +403,27 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
     {
         try
         {
-            AppSettings settings = _settingsProvider();
-            if (string.IsNullOrWhiteSpace(settings.BaseUrl)
-                || string.IsNullOrWhiteSpace(settings.ApiKey)
-                || !Uri.TryCreate(settings.BaseUrl, UriKind.Absolute, out _))
+            // 只预热当前档案。备用档案平时不该被打扰 —— 那会白白产生请求，也可能触发对方的限流。
+            ApiProfile? profile = _warmupProfileProvider?.Invoke();
+            if (profile is null
+                || string.IsNullOrWhiteSpace(profile.BaseUrl)
+                || string.IsNullOrWhiteSpace(profile.ApiKey)
+                || !Uri.TryCreate(profile.BaseUrl, UriKind.Absolute, out _))
             {
                 return;
             }
 
             var request = new TranslationRequest(
-                settings.BaseUrl,
-                settings.ApiKey,
-                settings.Model,
+                profile.BaseUrl,
+                profile.ApiKey,
+                profile.Model,
                 string.Empty,
                 string.Empty,
-                settings.Temperature,
-                settings.MaxTokens,
-                settings.RequestTimeoutSeconds,
-                settings.FirstTokenTimeoutSeconds,
-                settings.ExtraRequestBody);
+                profile.Temperature,
+                profile.MaxTokens,
+                profile.RequestTimeoutSeconds,
+                profile.FirstTokenTimeoutSeconds,
+                profile.ExtraRequestBody);
             using HttpRequestMessage message = CreateRequest(request, HttpMethod.Get, "models");
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_warmupCancellation.Token);
             timeout.CancelAfter(TimeSpan.FromSeconds(10));

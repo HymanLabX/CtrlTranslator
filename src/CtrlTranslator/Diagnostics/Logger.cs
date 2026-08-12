@@ -14,7 +14,7 @@ public static partial class Logger
     private static readonly object SyncRoot = new();
     private static readonly ConcurrentQueue<PendingLog> PendingLogs = new();
     private static string _logDirectory = string.Empty;
-    private static string _apiKey = string.Empty;
+    private static string[] _apiKeys = [];
     private static bool _initialized;
     private static System.Threading.Timer? _queueTimer;
     private static int _isDrainingQueue;
@@ -42,11 +42,21 @@ public static partial class Logger
         }
     }
 
-    public static void SetApiKey(string? apiKey)
+    /// <summary>
+    /// 登记所有需要在日志里脱敏的 Key。多档案下每个档案各有一个 Key，漏登记一个就等于明文落盘。
+    /// </summary>
+    public static void SetApiKeys(IEnumerable<string?> apiKeys)
     {
+        string[] values = apiKeys
+            .Select(key => key?.Trim())
+            .Where(key => !string.IsNullOrEmpty(key))
+            .Select(key => key!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
         lock (SyncRoot)
         {
-            _apiKey = apiKey?.Trim() ?? string.Empty;
+            _apiKeys = values;
         }
     }
 
@@ -85,13 +95,13 @@ public static partial class Logger
         }
 
         string result = ApiKeyPattern().Replace(value, "***");
-        string apiKey;
+        string[] apiKeys;
         lock (SyncRoot)
         {
-            apiKey = _apiKey;
+            apiKeys = _apiKeys;
         }
 
-        if (!string.IsNullOrEmpty(apiKey))
+        foreach (string apiKey in apiKeys)
         {
             result = result.Replace(apiKey, "***", StringComparison.Ordinal);
         }

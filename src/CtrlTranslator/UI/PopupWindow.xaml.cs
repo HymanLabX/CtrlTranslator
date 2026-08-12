@@ -146,6 +146,7 @@ public partial class PopupWindow : Window
         CopyButton.IsEnabled = true;
         StarButton.IsEnabled = result.RecordId.HasValue;
         StarButton.Content = result.Starred ? "★" : "☆";
+        ShowFallbackNotice(result);
 
         if (result.ShowReasoningWarning)
         {
@@ -571,6 +572,22 @@ public partial class PopupWindow : Window
         document.SetResourceReference(TextElement.FontFamilyProperty, "Font.Ui");
         document.SetResourceReference(TextElement.ForegroundProperty, "Brush.Text");
         return document;
+    }
+
+    /// <summary>
+    /// 发生了自动降级时，用一行小字说明本次是谁翻的。刻意不用醒目的警告条 ——
+    /// 降级是软件替用户兜住了故障，不该做成打断阅读的红色报错。
+    /// </summary>
+    private void ShowFallbackNotice(TranslationResult result)
+    {
+        if (result.FellBackFromProfileName is not { Length: > 0 } failedProfile)
+        {
+            FallbackNoticeText.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        FallbackNoticeText.Text = $"「{failedProfile}」暂时不可用，已自动改用「{result.ProfileName}」翻译。";
+        FallbackNoticeText.Visibility = Visibility.Visible;
     }
 
     private void ShowReasoningWarning(string model)

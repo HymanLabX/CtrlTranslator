@@ -19,10 +19,13 @@ internal sealed record TranslationResult(
     long? RecordId,
     long FirstTokenLatencyMilliseconds,
     long TotalLatencyMilliseconds,
-    bool ShowReasoningWarning);
+    bool ShowReasoningWarning,
+    string ProfileName,
+    string? FellBackFromProfileName);
 
 /// <summary>
 /// 串联提示词、缓存和网络请求；新请求开始时会先取消旧请求。
+/// 当前档案秒级失败时，按 <see cref="AppSettings.BuildFailoverChain"/> 给出的顺序自动改用备用档案。
 /// </summary>
 internal sealed class TranslationService : IDisposable
 {
@@ -30,16 +33,23 @@ internal sealed class TranslationService : IDisposable
     private readonly Func<AppSettings> _settingsProvider;
     private readonly HistoryRepository _historyRepository;
     private readonly ITranslationClient _client;
+    private readonly Action<ApiProfile, string>? _profileMarkedFailed;
     private CancellationTokenSource? _currentCancellation;
     private bool _disposed;
 
+    /// <param name="profileMarkedFailed">
+    /// 某个档案因持久故障被标记失效时回调。持久化配置与提醒用户由上层负责，
+    /// 翻译服务不碰 <see cref="SettingsStore"/>，也不碰界面。
+    /// </param>
     public TranslationService(
         Func<AppSettings> settingsProvider,
-        HistoryRepository historyRepository)
+        HistoryRepository historyRepository,
+        Action<ApiProfile, string>? profileMarkedFailed = null)
     {
         _settingsProvider = settingsProvider;
         _historyRepository = historyRepository;
-        _client = new OpenAiCompatibleClient(settingsProvider);
+        _profileMarkedFailed = profileMarkedFailed;
+        _client = new OpenAiCompatibleClient(() => settingsProvider().CurrentProfile);
     }
 
     public async Task<TranslationResult> TranslateAsync(
@@ -53,104 +63,187 @@ internal sealed class TranslationService : IDisposable
         try
         {
             AppSettings settings = _settingsProvider();
-            ValidateConfiguration(settings);
             BuiltPrompt prompt = PromptBuilder.Build(sourceText, settings);
-            string cacheKey = CreateCacheKey(
-                sourceText,
-                prompt.TargetLanguage,
-                prompt.Mode.Id,
-                settings.Model);
+            IReadOnlyList<ApiProfile> chain = settings.BuildFailoverChain();
 
-            if (!settings.PrivacyMode && !bypassCache)
+            // 只有一个档案时标记失效毫无意义（没有备用可切），只会让用户对着一个红色感叹号发懵。
+            bool canMarkFailed = settings.Profiles.Count > 1;
+            Exception? lastException = null;
+
+            for (int index = 0; index < chain.Count; index++)
             {
-                TranslationRecord? cached = await TryReadCacheAsync(cacheKey, ownCancellation.Token);
-                if (cached is not null)
+                ApiProfile profile = chain[index];
+                ownCancellation.Token.ThrowIfCancellationRequested();
+
+                try
                 {
-                    Logger.Info("翻译", "cache hit");
-                    return new TranslationResult(
-                        cached.SourceText,
-                        cached.ResultText,
-                        cached.TargetLanguage,
-                        cached.ModeId,
-                        cached.Model,
-                        cached.IsWord,
-                        FromCache: true,
-                        cached.Starred,
-                        cached.Id,
-                        FirstTokenLatencyMilliseconds: 0,
-                        TotalLatencyMilliseconds: 0,
-                        ShowReasoningWarning: false);
+                    return await TranslateWithProfileAsync(
+                        profile,
+                        index > 0 ? chain[0].Name : null,
+                        sourceText,
+                        appName,
+                        prompt,
+                        settings,
+                        progress,
+                        bypassCache,
+                        ownCancellation.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    lastException = exception;
+                    FailoverDecision decision = FailoverPolicy.Classify(exception, profile.Model);
+                    if (decision.Verdict == FailoverVerdict.Fatal)
+                    {
+                        Logger.Warning(
+                            "翻译",
+                            $"档案「{profile.Name}」失败且不适合降级（{exception.GetType().Name}），直接报错。");
+                        throw;
+                    }
+
+                    if (decision.Verdict == FailoverVerdict.Persistent
+                        && canMarkFailed
+                        && decision.PersistentReason is { } reason)
+                    {
+                        profile.MarkFailed(reason);
+                        Logger.Warning("翻译", $"档案「{profile.Name}」已标记失效：{reason}。");
+                        _profileMarkedFailed?.Invoke(profile, reason);
+                    }
+
+                    bool hasNext = index + 1 < chain.Count;
+                    Logger.Warning(
+                        "翻译",
+                        $"档案「{profile.Name}」本次失败（{decision.Verdict}）。"
+                        + (hasNext ? "正在改用下一个备用档案。" : "没有更多备用档案可用。"));
                 }
             }
 
-            if (bypassCache)
-            {
-                Logger.Info("翻译", "本次重译已绕过缓存，将使用最新请求参数。");
-            }
-
-            var request = new TranslationRequest(
-                settings.BaseUrl.Trim(),
-                settings.ApiKey.Trim(),
-                settings.Model.Trim(),
-                prompt.SystemPrompt,
-                prompt.UserContent,
-                settings.Temperature,
-                settings.MaxTokens,
-                settings.RequestTimeoutSeconds,
-                settings.FirstTokenTimeoutSeconds,
-                settings.ExtraRequestBody);
-
-            TranslationClientResult clientResult = await _client.TranslateAsync(
-                request,
-                progress,
-                ownCancellation.Token);
-            Logger.Info(
-                "翻译",
-                $"翻译完成：首字 {clientResult.FirstTokenLatencyMilliseconds}ms，总耗时 {clientResult.TotalLatencyMilliseconds}ms。");
-
-            long? recordId = null;
-            if (!settings.PrivacyMode)
-            {
-                var record = new TranslationRecord
-                {
-                    CacheKey = cacheKey,
-                    SourceText = sourceText,
-                    ResultText = clientResult.Text,
-                    TargetLanguage = prompt.TargetLanguage,
-                    ModeId = prompt.Mode.Id,
-                    Model = settings.Model.Trim(),
-                    IsWord = prompt.IsWord,
-                    Starred = false,
-                    AppName = appName,
-                    LatencyMilliseconds = clientResult.TotalLatencyMilliseconds,
-                    CreatedAt = DateTime.Now
-                };
-                recordId = await TryInsertHistoryAsync(record, ownCancellation.Token);
-            }
-
-            bool showReasoningWarning = !settings.SuppressReasoningWarning
-                && ModelHeuristics.ShouldWarnAboutReasoningModel(
-                    settings.Model,
-                    clientResult.SawReasoning,
-                    clientResult.FirstTokenLatencyMilliseconds);
-            return new TranslationResult(
-                sourceText,
-                clientResult.Text,
-                prompt.TargetLanguage,
-                prompt.Mode.Id,
-                settings.Model.Trim(),
-                prompt.IsWord,
-                FromCache: false,
-                Starred: false,
-                recordId,
-                clientResult.FirstTokenLatencyMilliseconds,
-                clientResult.TotalLatencyMilliseconds,
-                showReasoningWarning);
+            throw lastException
+                ?? new InvalidOperationException("没有任何可用的服务商档案。");
         }
         finally
         {
             ReleaseCurrentCancellation(ownCancellation);
         }
+    }
+
+    private async Task<TranslationResult> TranslateWithProfileAsync(
+        ApiProfile profile,
+        string? fellBackFromProfileName,
+        string sourceText,
+        string? appName,
+        BuiltPrompt prompt,
+        AppSettings settings,
+        IProgress<TranslationStreamUpdate>? progress,
+        bool bypassCache,
+        CancellationToken cancellationToken)
+    {
+        ValidateProfile(profile);
+
+        // 缓存 key 里带的是本次实际要用的模型名。降级到别的模型时，写入和读取用的是同一把
+        // key，绝不会出现"主档案恢复后却命中了备用模型译文"这种串台。
+        string cacheKey = CreateCacheKey(
+            sourceText,
+            prompt.TargetLanguage,
+            prompt.Mode.Id,
+            profile.Model);
+
+        if (!settings.PrivacyMode && !bypassCache)
+        {
+            TranslationRecord? cached = await TryReadCacheAsync(cacheKey, cancellationToken);
+            if (cached is not null)
+            {
+                Logger.Info("翻译", "cache hit");
+                return new TranslationResult(
+                    cached.SourceText,
+                    cached.ResultText,
+                    cached.TargetLanguage,
+                    cached.ModeId,
+                    cached.Model,
+                    cached.IsWord,
+                    FromCache: true,
+                    cached.Starred,
+                    cached.Id,
+                    FirstTokenLatencyMilliseconds: 0,
+                    TotalLatencyMilliseconds: 0,
+                    ShowReasoningWarning: false,
+                    profile.Name,
+                    FellBackFromProfileName: null);
+            }
+        }
+
+        if (bypassCache)
+        {
+            Logger.Info("翻译", "本次重译已绕过缓存，将使用最新请求参数。");
+        }
+
+        var request = new TranslationRequest(
+            profile.BaseUrl.Trim(),
+            profile.ApiKey.Trim(),
+            profile.Model.Trim(),
+            prompt.SystemPrompt,
+            prompt.UserContent,
+            profile.Temperature,
+            profile.MaxTokens,
+            profile.RequestTimeoutSeconds,
+            profile.FirstTokenTimeoutSeconds,
+            profile.ExtraRequestBody);
+
+        TranslationClientResult clientResult = await _client.TranslateAsync(
+            request,
+            progress,
+            cancellationToken);
+        Logger.Info(
+            "翻译",
+            $"翻译完成（档案「{profile.Name}」）：首字 {clientResult.FirstTokenLatencyMilliseconds}ms，"
+            + $"总耗时 {clientResult.TotalLatencyMilliseconds}ms。");
+
+        long? recordId = null;
+        if (!settings.PrivacyMode)
+        {
+            var record = new TranslationRecord
+            {
+                CacheKey = cacheKey,
+                SourceText = sourceText,
+                ResultText = clientResult.Text,
+                TargetLanguage = prompt.TargetLanguage,
+                ModeId = prompt.Mode.Id,
+                Model = profile.Model.Trim(),
+                IsWord = prompt.IsWord,
+                Starred = false,
+                AppName = appName,
+                LatencyMilliseconds = clientResult.TotalLatencyMilliseconds,
+                CreatedAt = DateTime.Now,
+                ProfileName = profile.Name,
+                PromptTokens = clientResult.PromptTokens,
+                CompletionTokens = clientResult.CompletionTokens
+            };
+            recordId = await TryInsertHistoryAsync(record, cancellationToken);
+        }
+
+        bool showReasoningWarning = !settings.SuppressReasoningWarning
+            && ModelHeuristics.ShouldWarnAboutReasoningModel(
+                profile.Model,
+                clientResult.SawReasoning,
+                clientResult.FirstTokenLatencyMilliseconds);
+        return new TranslationResult(
+            sourceText,
+            clientResult.Text,
+            prompt.TargetLanguage,
+            prompt.Mode.Id,
+            profile.Model.Trim(),
+            prompt.IsWord,
+            FromCache: false,
+            Starred: false,
+            recordId,
+            clientResult.FirstTokenLatencyMilliseconds,
+            clientResult.TotalLatencyMilliseconds,
+            showReasoningWarning,
+            profile.Name,
+            fellBackFromProfileName);
     }
 
     public async Task SetStarredAsync(long recordId, bool starred, CancellationToken cancellationToken)
@@ -192,17 +285,17 @@ internal sealed class TranslationService : IDisposable
         _client.Dispose();
     }
 
-    private static void ValidateConfiguration(AppSettings settings)
+    private static void ValidateProfile(ApiProfile profile)
     {
-        if (string.IsNullOrWhiteSpace(settings.BaseUrl)
-            || string.IsNullOrWhiteSpace(settings.ApiKey)
-            || string.IsNullOrWhiteSpace(settings.Model))
+        if (string.IsNullOrWhiteSpace(profile.BaseUrl)
+            || string.IsNullOrWhiteSpace(profile.ApiKey)
+            || string.IsNullOrWhiteSpace(profile.Model))
         {
             throw new TranslationConfigurationException(
                 TranslationConfigurationError.MissingApiKey);
         }
 
-        if (!Uri.TryCreate(settings.BaseUrl.Trim(), UriKind.Absolute, out Uri? uri)
+        if (!Uri.TryCreate(profile.BaseUrl.Trim(), UriKind.Absolute, out Uri? uri)
             || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
             throw new TranslationConfigurationException(

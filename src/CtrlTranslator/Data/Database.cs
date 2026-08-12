@@ -27,9 +27,13 @@ public sealed class Database
     {
         using SqliteConnection connection = CreateConnection();
         connection.Open();
-        using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = SchemaSql;
-        command.ExecuteNonQuery();
+        using (SqliteCommand command = connection.CreateCommand())
+        {
+            command.CommandText = SchemaSql;
+            command.ExecuteNonQuery();
+        }
+
+        AddMissingColumns(connection);
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
@@ -37,9 +41,51 @@ public sealed class Database
         await using SqliteConnection connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = SchemaSql;
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        await using (SqliteCommand command = connection.CreateCommand())
+        {
+            command.CommandText = SchemaSql;
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        AddMissingColumns(connection);
+    }
+
+    /// <summary>
+    /// 给老库补上 M5 新增的列。SQLite 的 <c>ALTER TABLE ADD COLUMN</c> 没有 IF NOT EXISTS，
+    /// 只能先用 <c>PRAGMA table_info</c> 查一遍现有列名再决定加哪些。
+    /// </summary>
+    private static void AddMissingColumns(SqliteConnection connection)
+    {
+        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using (SqliteCommand info = connection.CreateCommand())
+        {
+            info.CommandText = "PRAGMA table_info(translations);";
+            using SqliteDataReader reader = info.ExecuteReader();
+            while (reader.Read())
+            {
+                existing.Add(reader.GetString(1));
+            }
+        }
+
+        (string Name, string Definition)[] added =
+        [
+            ("profile_name", "TEXT"),
+            ("prompt_tokens", "INTEGER"),
+            ("completion_tokens", "INTEGER")
+        ];
+
+        foreach ((string name, string definition) in added)
+        {
+            if (existing.Contains(name))
+            {
+                continue;
+            }
+
+            using SqliteCommand alter = connection.CreateCommand();
+            alter.CommandText = $"ALTER TABLE translations ADD COLUMN {name} {definition};";
+            alter.ExecuteNonQuery();
+            Logger.Info("数据库", $"历史表已补充列 {name}。");
+        }
     }
 
     private const string SchemaSql = """
@@ -57,7 +103,10 @@ public sealed class Database
               starred      INTEGER NOT NULL DEFAULT 0,
               app_name     TEXT,
               latency_ms   INTEGER,
-              created_at   TEXT    NOT NULL
+              created_at   TEXT    NOT NULL,
+              profile_name      TEXT,
+              prompt_tokens     INTEGER,
+              completion_tokens INTEGER
             );
 
             CREATE INDEX IF NOT EXISTS idx_cache_key ON translations(cache_key);
