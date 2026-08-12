@@ -17,17 +17,6 @@
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="FontSize" Value="{DynamicResource Size.Body}" />
         </Style>
-        <Style x:Key="SectionTitle" TargetType="TextBlock">
-            <Setter Property="FontFamily" Value="{DynamicResource Font.Display}" />
-            <Setter Property="FontSize" Value="{DynamicResource Size.Heading}" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Margin" Value="0,0,0,6" />
-        </Style>
-        <Style x:Key="SectionCaption" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
-            <Setter Property="TextWrapping" Value="Wrap" />
-            <Setter Property="Margin" Value="0,0,0,22" />
-        </Style>
         <Style x:Key="Card" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource Brush.SurfaceRaised}" />
             <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
@@ -186,10 +175,6 @@
                 <!-- ==================== 常规 ==================== -->
                 <ScrollViewer x:Name="GeneralSection" VerticalScrollBarVisibility="Auto" Padding="28,20,28,24">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="常规" />
-                        <TextBlock Style="{StaticResource SectionCaption}"
-                                   Text="调整划词触发、应用启动和翻译浮窗。修改后立即生效。" />
-
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <TextBlock Style="{StaticResource CardTitle}" Text="划词触发" />
@@ -289,10 +274,6 @@
                 <ScrollViewer x:Name="ProfilesSection" Visibility="Collapsed"
                               VerticalScrollBarVisibility="Auto" Padding="28,20,28,24">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="翻译服务" />
-                        <TextBlock Style="{StaticResource SectionCaption}"
-                                   Text="管理服务商档案、模型参数和连接检测。列表顺序也是服务故障时的自动降级顺序。" />
-
                         <Border Style="{StaticResource Card}">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -479,10 +460,6 @@
                 <ScrollViewer x:Name="BehaviorSection" Visibility="Collapsed"
                               VerticalScrollBarVisibility="Auto" Padding="28,20,28,24">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="翻译偏好" />
-                        <TextBlock Style="{StaticResource SectionCaption}"
-                                   Text="翻译模式与语言方向对所有服务商通用，切换服务商不会改变这些设置。" />
-
                         <Border Style="{StaticResource Card}">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -554,10 +531,6 @@
                 <ScrollViewer x:Name="PrivacySection" Visibility="Collapsed"
                               VerticalScrollBarVisibility="Auto" Padding="28,20,28,24">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource SectionTitle}" Text="隐私与数据" />
-                        <TextBlock Style="{StaticResource SectionCaption}"
-                                   Text="API Key 使用 Windows 账户加密保存在本机，明文不落盘，也不会写入日志。" />
-
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <TextBlock Style="{StaticResource CardTitle}" Text="隐私保护" />
