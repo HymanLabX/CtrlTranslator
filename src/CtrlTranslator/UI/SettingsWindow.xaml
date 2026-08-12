@@ -65,7 +65,7 @@
                                 <Setter TargetName="Shell" Property="Background" Value="{DynamicResource Brush.Hover}" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Shell" Property="Background" Value="{DynamicResource Brush.SurfaceRaised}" />
+                                <Setter TargetName="Shell" Property="Background" Value="{DynamicResource Brush.AccentSubtle}" />
                                 <Setter TargetName="Shell" Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
                                 <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
                                 <Setter Property="FontWeight" Value="SemiBold" />
