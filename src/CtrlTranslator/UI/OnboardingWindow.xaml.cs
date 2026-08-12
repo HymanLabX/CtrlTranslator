@@ -49,18 +49,68 @@ public partial class OnboardingWindow : Window
 
     private void ProviderList_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (ProviderList.SelectedItem is not ProviderChoice provider)
+        if (ProviderList.SelectedItem is ProviderChoice provider)
         {
-            return;
+            ApplyProvider(provider.Preset);
         }
+    }
 
-        BaseUrlBox.Text = provider.Preset.BaseUrl;
-        ModelBox.Text = provider.Preset.Model;
+    /// <summary>
+    /// 选中服务商后把这一页能替用户填的都填好：地址、常用模型、申请 Key 的入口。
+    /// 只有「自定义」才需要用户自己填地址 —— 填错接口地址是新手最常见的卡点。
+    /// </summary>
+    private void ApplyProvider(ProviderPreset preset)
+    {
+        bool isCustom = string.Equals(preset.Name, ProviderPresets.CustomName, StringComparison.Ordinal);
+
+        KnownBaseUrlPanel.Visibility = isCustom ? Visibility.Collapsed : Visibility.Visible;
+        CustomBaseUrlPanel.Visibility = isCustom ? Visibility.Visible : Visibility.Collapsed;
+        BaseUrlDisplayText.Text = preset.BaseUrl;
+        BaseUrlBox.Text = isCustom ? string.Empty : preset.BaseUrl;
+
+        ModelBox.ItemsSource = preset.Models;
+        ModelBox.Text = preset.Model;
+
+        ApplyKeyButton.Visibility = string.IsNullOrWhiteSpace(preset.KeyUrl)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        CredentialsProviderText.Text = isCustom
+            ? "你选的是「自定义」，需要自己填写服务地址。"
+            : $"已选择「{preset.Name}」，服务地址已经替你填好了。你只需要粘一个 API Key、选个模型。";
+        SetStatus(string.Empty, isError: false);
+    }
+
+    /// <summary>当前生效的服务地址：已知服务商用预设值，自定义才读输入框。</summary>
+    private string CurrentBaseUrl =>
+        CustomBaseUrlPanel.Visibility == Visibility.Visible
+            ? BaseUrlBox.Text.Trim()
+            : SelectedPreset().BaseUrl;
+
+    private void SetStatus(string message, bool isError)
+    {
+        CredentialsStatusText.Text = message;
+        CredentialsStatusText.SetResourceReference(
+            System.Windows.Controls.TextBlock.ForegroundProperty,
+            isError ? "Brush.Danger" : "Brush.TextSecondary");
+    }
+
+    private void ApplyKeyButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        OpenUrl(SelectedPreset().KeyUrl);
     }
 
     private void OpenProviderWebsite_OnClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: string url } || string.IsNullOrWhiteSpace(url))
+        if (sender is Button { Tag: string url })
+        {
+            OpenUrl(url);
+        }
+    }
+
+    private void OpenUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
         {
             return;
         }
@@ -85,25 +135,28 @@ public partial class OnboardingWindow : Window
                 return;
             }
 
-            CredentialsStatusText.Text = "正在读取可用模型…";
+            SetStatus("正在读取可用模型…", isError: false);
             // 见 SettingsWindow 里同名调用的注释：首次连接某个服务商时的代理探测/DNS
             // 解析可能在真正 await 之前同步耗时，扔进线程池避免卡住向导界面。
+            string previousModel = ModelBox.Text;
             IReadOnlyList<string> models = await Task.Run(
                 () => OpenAiCompatibleClient.FetchModelsAsync(baseUrl, apiKey, CancellationToken.None));
-            ModelBox.ItemsSource = models;
-            if (models.Count > 0 && string.IsNullOrWhiteSpace(ModelBox.Text))
+            if (models.Count == 0)
             {
-                ModelBox.SelectedIndex = 0;
+                SetStatus("服务商没有返回模型列表，保留原有选项，你也可以直接手输模型名。", isError: false);
+                return;
             }
-            CredentialsStatusText.Text = models.Count == 0
-                ? "服务商没有返回模型列表，可以手动填写模型名。"
-                : $"已读取 {models.Count} 个模型，请选择一个。";
+
+            ModelBox.ItemsSource = models;
+            // 别把用户已经选好的模型冲掉 —— 拉取只是"多给几个选项"，不是"替他重选"。
+            ModelBox.Text = previousModel;
+            SetStatus($"已读取 {models.Count} 个模型，可以从下拉里换一个。", isError: false);
         }
         catch (Exception exception)
         {
             Logger.Error("首次向导", "拉取模型列表失败。", exception);
             UserFacingError error = ErrorMessages.FromException(exception, ModelBox.Text, thinkingDisabled: false);
-            CredentialsStatusText.Text = error.Message;
+            SetStatus(error.Message, isError: true);
         }
     }
 
@@ -294,29 +347,29 @@ public partial class OnboardingWindow : Window
 
     private bool TryReadCredentials(out string baseUrl, out string apiKey, out string model)
     {
-        baseUrl = BaseUrlBox.Text.Trim();
+        baseUrl = CurrentBaseUrl;
         apiKey = ApiKeyBox.Password.Trim();
         model = ModelBox.Text.Trim();
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out Uri? uri)
             || uri.Scheme is not ("http" or "https"))
         {
-            CredentialsStatusText.Text = "服务地址格式不对，正确的样子像：https://api.deepseek.com/v1";
+            SetStatus("服务地址格式不对，正确的样子像：https://api.deepseek.com/v1", isError: true);
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(apiKey) && !uri.IsLoopback)
         {
-            CredentialsStatusText.Text = "请填写 API Key；本地 Ollama 可以不填。";
+            SetStatus("请粘贴 API Key；本地 Ollama 可以不填。", isError: true);
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(model))
         {
-            CredentialsStatusText.Text = "请填写或选择一个模型。";
+            SetStatus("请选择或填写一个模型。", isError: true);
             return false;
         }
 
-        CredentialsStatusText.Text = string.Empty;
+        SetStatus(string.Empty, isError: false);
         return true;
     }
 

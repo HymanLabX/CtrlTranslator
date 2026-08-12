@@ -27,6 +27,9 @@ public partial class MainWindow : Window
         HistoryGrid.ItemsSource = _records;
         _searchTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         _searchTimer.Tick += SearchTimer_OnTick;
+        // 选择变化时才会写这行字，但刚打开窗口时还没有"变化"，
+        // 不预置的话右侧详情区是一片没有任何说明的空白。
+        MetadataText.Text = "请选择一条记录查看详情";
         Loaded += MainWindow_OnLoaded;
         Closed += MainWindow_OnClosed;
     }

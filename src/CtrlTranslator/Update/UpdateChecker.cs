@@ -8,6 +8,11 @@ using CtrlTranslator.Diagnostics;
 namespace CtrlTranslator.Update;
 
 /// <summary>GitHub 上一个可用的新版本。</summary>
+/// <param name="ExpectedSha256">
+/// 安装包的 SHA256，取自 GitHub Releases API 里每个资产自带的 <c>digest</c> 字段
+/// （形如 <c>sha256:858dbde8…</c>，这里只存去掉前缀后的十六进制串）。
+/// 不需要额外发布校验文件 —— 这个值本来就在我们已经下载的那份 JSON 里。
+/// </param>
 public sealed record ReleaseInfo(
     string Tag,
     Version Version,
@@ -16,7 +21,7 @@ public sealed record ReleaseInfo(
     string SetupFileName,
     string SetupDownloadUrl,
     long SetupSizeBytes,
-    string ChecksumUrl,
+    string ExpectedSha256,
     string HtmlUrl)
 {
     public double SetupSizeMb => Math.Round(SetupSizeBytes / 1024d / 1024d, 1);
@@ -33,7 +38,9 @@ public sealed record ReleaseInfo(
 public static partial class UpdateChecker
 {
     private const string Repository = "HuayouXiang/CtrlTranslator";
-    private const string ChecksumAssetName = "SHA256SUMS.txt";
+
+    /// <summary>资产 digest 字段的算法前缀，例如 <c>sha256:858dbde8…</c>。</summary>
+    private const string DigestPrefix = "sha256:";
 
     /// <summary><c>/releases/latest</c> 天然跳过预发布，所以 rc / beta 不会被推给用户。</summary>
     private const string LatestReleaseUrl = $"https://api.github.com/repos/{Repository}/releases/latest";
@@ -119,38 +126,45 @@ public static partial class UpdateChecker
         string? setupName = null;
         string? setupUrl = null;
         long setupSize = 0;
-        string? checksumUrl = null;
+        string? expectedSha256 = null;
 
         foreach (JsonElement asset in assets.EnumerateArray())
         {
             string? name = ReadString(asset, "name");
             string? url = ReadString(asset, "browser_download_url");
-            if (name is null || url is null)
+            if (name is null || url is null || !SetupAssetPattern().IsMatch(name))
             {
                 continue;
             }
 
-            if (string.Equals(name, ChecksumAssetName, StringComparison.OrdinalIgnoreCase))
+            setupName = name;
+            setupUrl = url;
+            setupSize = asset.TryGetProperty("size", out JsonElement size)
+                && size.ValueKind == JsonValueKind.Number
+                    ? size.GetInt64()
+                    : 0;
+
+            // GitHub 自己就会给出每个资产的摘要，不用我们额外发一个校验文件。
+            string? digest = ReadString(asset, "digest");
+            if (digest is not null && digest.StartsWith(DigestPrefix, StringComparison.OrdinalIgnoreCase))
             {
-                checksumUrl = url;
-            }
-            else if (SetupAssetPattern().IsMatch(name))
-            {
-                setupName = name;
-                setupUrl = url;
-                setupSize = asset.TryGetProperty("size", out JsonElement size)
-                    && size.ValueKind == JsonValueKind.Number
-                        ? size.GetInt64()
-                        : 0;
+                expectedSha256 = digest[DigestPrefix.Length..].Trim();
             }
         }
 
-        // 缺任何一个都不往下走：没有安装包无从更新，没有校验文件就不该下载并执行任何东西。
-        if (setupName is null || setupUrl is null || checksumUrl is null)
+        if (setupName is null || setupUrl is null)
+        {
+            Logger.Warning("自动更新", $"Release {tag} 里没有安装包，已跳过。");
+            return null;
+        }
+
+        // 拿不到摘要就不更新。宁可不更新，也不下载并执行一个无从验证的 exe ——
+        // 这里不做任何"没有校验值就放行"的退路。
+        if (string.IsNullOrWhiteSpace(expectedSha256) || expectedSha256.Length != 64)
         {
             Logger.Warning(
                 "自动更新",
-                $"Release {tag} 的产物不齐全（安装包：{setupName is not null}，校验文件：{checksumUrl is not null}），已跳过。");
+                $"Release {tag} 的安装包没有可用的 digest 摘要，无法校验，已跳过。");
             return null;
         }
 
@@ -162,7 +176,7 @@ public static partial class UpdateChecker
             setupName,
             setupUrl,
             setupSize,
-            checksumUrl,
+            expectedSha256,
             ReadString(root, "html_url") ?? ReleasesPageUrl);
     }
 

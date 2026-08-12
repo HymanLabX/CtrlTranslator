@@ -24,9 +24,22 @@ public sealed record DownloadProgress(long ReceivedBytes, long TotalBytes)
 /// 下载安装包并<b>强制校验 SHA256</b>，然后把安装程序拉起来。
 /// </summary>
 /// <remarks>
+/// <para>
 /// 校验这一步没有开关也没有例外。自动更新本质上就是"从网上取一个 exe 下来执行"，
-/// 少了校验就是给这台机器开了个远程代码执行的口子 —— GitHub 账号被盗、
-/// 传输中被篡改，任何一种都够呛。哈希对不上就删文件、报错，绝不执行。
+/// 少了校验就是给这台机器开了个远程代码执行的口子。哈希对不上就删文件、报错，绝不执行。
+/// </para>
+/// <para>
+/// 期望哈希取自 GitHub Releases API 里资产自带的 <c>digest</c> 字段，
+/// <b>不需要额外发布校验文件</b>：那个值本来就在检查更新时已经下载的那份 JSON 里。
+/// </para>
+/// <para>
+/// <b>这套机制防什么、不防什么</b>：元数据走 <c>api.github.com</c>、安装包走
+/// <c>objects.githubusercontent.com</c>，两条不同链路互相印证，能挡住下载被截断、
+/// CDN 出错或中途被改动。但它<b>挡不住仓库或 GitHub 账号本身被攻破</b> ——
+/// 攻击者换掉资产后 GitHub 会重算并报告新的 digest，校验照样通过。
+/// 要防住那种情况需要私钥离线的非对称签名（minisign 之类）；本项目的定位是
+/// 自用与少数同事共享，明确不把"仓库被攻破"纳入威胁模型，故不引入密钥管理的长期负担。
+/// </para>
 /// </remarks>
 public static class UpdateDownloader
 {
@@ -37,20 +50,19 @@ public static class UpdateDownloader
         IProgress<DownloadProgress>? progress,
         CancellationToken cancellationToken)
     {
-        string expectedHash = await FetchExpectedHashAsync(release, cancellationToken);
         string targetPath = PrepareTargetPath(release.SetupFileName);
 
         await DownloadAsync(release, targetPath, progress, cancellationToken);
 
         string actualHash = await ComputeSha256Async(targetPath, cancellationToken);
-        if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(actualHash, release.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
         {
             TryDelete(targetPath);
             Logger.Error(
                 "自动更新",
-                $"安装包校验失败，已删除。期望 {expectedHash}，实际 {actualHash}。");
+                $"安装包校验失败，已删除。期望 {release.ExpectedSha256}，实际 {actualHash}。");
             throw new UpdateDownloadException(
-                "下载到的安装包和官方校验值对不上，已经删掉了。可能是下载过程被打断或被中间设备改动过，请稍后重试。");
+                "下载到的安装包和 GitHub 记录的校验值对不上，已经删掉了。可能是下载过程被打断或被中间设备改动过，请稍后重试。");
         }
 
         Logger.Info("自动更新", $"安装包已下载并通过 SHA256 校验：{targetPath}");
@@ -81,42 +93,6 @@ public static class UpdateDownloader
 
         Process.Start(startInfo);
         Logger.Info("自动更新", $"已启动安装程序（{(elevate ? "提权" : "当前用户")}），本进程即将退出。");
-    }
-
-    private static async Task<string> FetchExpectedHashAsync(
-        ReleaseInfo release,
-        CancellationToken cancellationToken)
-    {
-        string content;
-        try
-        {
-            content = await UpdateChecker.SharedClient.GetStringAsync(release.ChecksumUrl, cancellationToken);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            throw new UpdateDownloadException("拿不到官方的校验文件，本次更新已中止。", exception);
-        }
-
-        // 标准 sha256sum 格式：<hash>  <filename>
-        foreach (string line in content.ReplaceLineEndings("\n").Split('\n'))
-        {
-            string trimmed = line.Trim();
-            if (trimmed.Length == 0)
-            {
-                continue;
-            }
-
-            string[] parts = trimmed.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length >= 2
-                && parts[0].Length == 64
-                && string.Equals(parts[^1].TrimStart('*'), release.SetupFileName, StringComparison.OrdinalIgnoreCase))
-            {
-                return parts[0];
-            }
-        }
-
-        throw new UpdateDownloadException(
-            $"校验文件里没有 {release.SetupFileName} 的记录，本次更新已中止。");
     }
 
     private static string PrepareTargetPath(string fileName)

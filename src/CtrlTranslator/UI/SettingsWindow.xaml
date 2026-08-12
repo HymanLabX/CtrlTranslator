@@ -141,7 +141,7 @@
                 <TextBlock x:Name="StatusText" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                            Foreground="{DynamicResource Brush.Success}"
                            Text="设置修改后会自动保存并立即生效。" />
-                <Button Grid.Column="1" Width="88" Height="30" Content="关闭" IsCancel="True"
+                <Button Grid.Column="1" Width="88" MinHeight="30" Content="关闭" IsCancel="True"
                         Click="CloseButton_OnClick" />
             </Grid>
         </Border>

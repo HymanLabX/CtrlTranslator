@@ -52,9 +52,9 @@
                     Style="{StaticResource Button.Ghost}" Padding="8,5"
                     Content="打开发布页面" Click="ReleasePageButton_OnClick" />
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="LaterButton" Width="96" Height="32" Margin="0,0,10,0"
+                <Button x:Name="LaterButton" Width="96" MinHeight="32" Margin="0,0,10,0"
                         Content="稍后" Click="LaterButton_OnClick" />
-                <Button x:Name="UpdateButton" Width="120" Height="32"
+                <Button x:Name="UpdateButton" Width="120" MinHeight="32"
                         Style="{StaticResource Button.Primary}"
                         Content="立即更新" Click="UpdateButton_OnClick" />
             </StackPanel>
