@@ -60,7 +60,7 @@
                                 <Setter TargetName="Shell" Property="Background" Value="{DynamicResource Brush.Hover}" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Shell" Property="Background" Value="{DynamicResource Brush.SurfaceRaised}" />
+                                <Setter TargetName="Shell" Property="Background" Value="{DynamicResource Brush.AccentSubtle}" />
                                 <Setter TargetName="Shell" Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
                                 <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
                                 <Setter Property="FontWeight" Value="SemiBold" />
@@ -119,8 +119,7 @@
                 <TextBlock Text="{Binding SourceText, Converter={StaticResource SingleLine}}"
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                            FontSize="{DynamicResource Size.Body}"
-                           Foreground="{DynamicResource Brush.Text}"
-                           ToolTip="{Binding SourceText}" />
+                           Foreground="{DynamicResource Brush.Text}" />
                 <StackPanel Grid.Column="1" Margin="10,0,0,0" Orientation="Horizontal"
                             HorizontalAlignment="Right" VerticalAlignment="Center">
                     <Button Width="36" Height="36" Padding="0" Style="{StaticResource Button.Icon}"
