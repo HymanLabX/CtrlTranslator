@@ -35,6 +35,11 @@ jobs:
     # 必须用 Windows：项目是 WPF，只能在 Windows 上编译。
     runs-on: windows-latest
 
+    # secrets 上下文在 step 的 if: 里是用不了的（GitHub 只允许 env/with/run 读它），
+    # 直接写会让整个 workflow 校验不通过、0 秒失败。提到 job 级 env 再让 if 读 env。
+    env:
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
@@ -110,7 +115,7 @@ jobs:
 
       - name: 上传未签名 exe
         id: upload-unsigned-exe
-        if: startsWith(github.ref, 'refs/tags/v') && secrets.SIGNPATH_API_TOKEN != ''
+        if: startsWith(github.ref, 'refs/tags/v') && env.SIGNPATH_API_TOKEN != ''
         uses: actions/upload-artifact@v7
         with:
           name: unsigned-exe
@@ -118,7 +123,7 @@ jobs:
           retention-days: 1
 
       - name: 签名 exe
-        if: startsWith(github.ref, 'refs/tags/v') && secrets.SIGNPATH_API_TOKEN != ''
+        if: startsWith(github.ref, 'refs/tags/v') && env.SIGNPATH_API_TOKEN != ''
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
@@ -130,7 +135,7 @@ jobs:
           output-artifact-directory: publish-signed
 
       - name: 用签名后的 exe 替换未签名版本
-        if: startsWith(github.ref, 'refs/tags/v') && secrets.SIGNPATH_API_TOKEN != ''
+        if: startsWith(github.ref, 'refs/tags/v') && env.SIGNPATH_API_TOKEN != ''
         shell: pwsh
         run: Copy-Item publish-signed\CtrlTranslator.exe publish\CtrlTranslator.exe -Force
 
@@ -163,7 +168,7 @@ jobs:
 
       - name: 上传未签名安装包
         id: upload-unsigned-setup
-        if: startsWith(github.ref, 'refs/tags/v') && secrets.SIGNPATH_API_TOKEN != ''
+        if: startsWith(github.ref, 'refs/tags/v') && env.SIGNPATH_API_TOKEN != ''
         uses: actions/upload-artifact@v7
         with:
           name: unsigned-setup
@@ -171,7 +176,7 @@ jobs:
           retention-days: 1
 
       - name: 签名安装包
-        if: startsWith(github.ref, 'refs/tags/v') && secrets.SIGNPATH_API_TOKEN != ''
+        if: startsWith(github.ref, 'refs/tags/v') && env.SIGNPATH_API_TOKEN != ''
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
@@ -183,7 +188,7 @@ jobs:
           output-artifact-directory: installer-signed
 
       - name: 用签名后的安装包替换未签名版本
-        if: startsWith(github.ref, 'refs/tags/v') && secrets.SIGNPATH_API_TOKEN != ''
+        if: startsWith(github.ref, 'refs/tags/v') && env.SIGNPATH_API_TOKEN != ''
         shell: pwsh
         run: |
           $name = Split-Path -Leaf '${{ steps.installer.outputs.path }}'
@@ -234,7 +239,7 @@ jobs:
           SETUP_NAME: ${{ steps.artifact.outputs.setup_name }}
           SETUP_SHA256: ${{ steps.artifact.outputs.setup_sha256 }}
           SETUP_SIZE_MB: ${{ steps.artifact.outputs.setup_size_mb }}
-          SIGNED: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+          SIGNED: ${{ env.SIGNPATH_API_TOKEN != '' }}
         run: |
           $fence = '```'
           $signedNote = if ($env:SIGNED -eq 'true') {
