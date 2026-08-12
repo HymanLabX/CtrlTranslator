@@ -20,6 +20,8 @@ public partial class MainWindow : Window
     private bool _loading;
     private bool _hasMore = true;
 
+    public event EventHandler? SettingsRequested;
+
     public MainWindow(HistoryRepository repository)
     {
         InitializeComponent();
@@ -220,6 +222,11 @@ public partial class MainWindow : Window
         }
     }
 
+    private void SettingsButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        SettingsRequested?.Invoke(this, EventArgs.Empty);
+    }
+
     private Task ReloadAsync() => LoadNextPageAsync(reset: true);
 
     private async Task LoadNextPageAsync(bool reset)
@@ -279,7 +286,7 @@ public partial class MainWindow : Window
         EmptyStateText.Text = searching
             ? "没有匹配的记录。换个关键词试试。"
             : starredOnly
-                ? "还没有收藏。翻译出来后点浮窗上的 ☆ 就能存进这里。"
+                ? "还没有收藏。翻译出来后点浮窗上的收藏按钮就能存进这里。"
                 : "还没有翻译记录。选中文字后双击 Ctrl 试试。";
         EmptyStateText.Visibility = Visibility.Visible;
     }

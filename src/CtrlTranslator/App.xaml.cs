@@ -788,6 +788,7 @@ public partial class App : System.Windows.Application
             if (_mainWindow is null)
             {
                 _mainWindow = new MainWindow(_historyRepository);
+                _mainWindow.SettingsRequested += MainWindow_OnSettingsRequested;
                 _mainWindow.Closed += MainWindow_OnClosed;
             }
 
@@ -811,12 +812,18 @@ public partial class App : System.Windows.Application
     {
         if (sender is MainWindow window)
         {
+            window.SettingsRequested -= MainWindow_OnSettingsRequested;
             window.Closed -= MainWindow_OnClosed;
             if (ReferenceEquals(_mainWindow, window))
             {
                 _mainWindow = null;
             }
         }
+    }
+
+    private void MainWindow_OnSettingsRequested(object? sender, EventArgs e)
+    {
+        ShowSettingsWindow(focusExtraRequestBody: false);
     }
 
     /// <summary>

@@ -2,16 +2,30 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="欢迎使用 CtrlTranslator" Width="760" Height="640"
-        ResizeMode="NoResize" WindowStartupLocation="CenterScreen">
+        ResizeMode="NoResize" WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource Brush.Bg}">
     <Window.Resources>
+        <Style x:Key="PageTitle" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{DynamicResource Font.Display}" />
+            <Setter Property="FontSize" Value="{DynamicResource Size.Heading}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+        <Style x:Key="PageCaption" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,0,0,22" />
+        </Style>
         <DataTemplate x:Key="DiagnosticItemTemplate">
-            <Grid Margin="0,3">
+            <Grid Margin="0,5">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="20" />
+                    <ColumnDefinition Width="24" />
                     <ColumnDefinition Width="112" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="Symbol" Text="{Binding StatusSymbol}" FontWeight="SemiBold" />
+                <Path x:Name="StatusIcon" Width="15" Height="15" VerticalAlignment="Center"
+                      Stretch="Uniform" StrokeThickness="1.6"
+                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
                 <TextBlock Grid.Column="1" Text="{Binding Name}" />
                 <TextBlock Grid.Column="2" Text="{Binding Detail}" TextWrapping="Wrap"
                            Foreground="{DynamicResource Brush.TextSecondary}"
@@ -19,170 +33,277 @@
             </Grid>
             <DataTemplate.Triggers>
                 <DataTrigger Binding="{Binding Status}" Value="Passed">
-                    <Setter TargetName="Symbol" Property="Foreground" Value="{DynamicResource Brush.Success}" />
+                    <Setter TargetName="StatusIcon" Property="Data" Value="{DynamicResource Icon.Check}" />
+                    <Setter TargetName="StatusIcon" Property="Stroke" Value="{DynamicResource Brush.Success}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding Status}" Value="Warning">
-                    <Setter TargetName="Symbol" Property="Foreground" Value="{DynamicResource Brush.Warning}" />
+                    <Setter TargetName="StatusIcon" Property="Data" Value="{DynamicResource Icon.Warning}" />
+                    <Setter TargetName="StatusIcon" Property="Stroke" Value="{DynamicResource Brush.Warning}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding Status}" Value="Failed">
-                    <Setter TargetName="Symbol" Property="Foreground" Value="{DynamicResource Brush.Danger}" />
+                    <Setter TargetName="StatusIcon" Property="Data" Value="{DynamicResource Icon.Error}" />
+                    <Setter TargetName="StatusIcon" Property="Stroke" Value="{DynamicResource Brush.Danger}" />
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
     </Window.Resources>
 
-    <Grid Margin="28">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
-        <DockPanel>
-            <TextBlock x:Name="StepText" DockPanel.Dock="Right" Foreground="{DynamicResource Brush.TextTertiary}" Text="第 1 / 4 步"/>
-            <TextBlock FontSize="22" FontWeight="SemiBold" Text="CtrlTranslator 初次设置"/>
-        </DockPanel>
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="184" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
 
-        <Grid Grid.Row="1" Margin="0,24,0,18">
-            <!-- 不要再给这层加固定 Width：外面 Grid 的宽度就是可用宽度，
-                 写死宽度再套 Margin/Padding 会把里面那行示意图挤到裁掉两端（踩过）。 -->
-            <StackPanel x:Name="WelcomePage" VerticalAlignment="Center">
-                <TextBlock FontSize="28" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap"
-                           Text="选中文字，双击 Ctrl，马上翻译"/>
-                <Border Margin="0,28" Padding="20,22" Background="{DynamicResource Brush.AccentSubtle}" CornerRadius="12">
-                    <!-- 用 WrapPanel：窗口再窄也只会换行，不会把字切掉 -->
-                    <WrapPanel HorizontalAlignment="Center">
-                        <TextBlock FontSize="20" Text="选中文字" VerticalAlignment="Center"/>
-                        <TextBlock Margin="14,0" FontSize="20" Text="→" VerticalAlignment="Center"/>
-                        <TextBlock FontSize="20" Text="Ctrl  Ctrl" VerticalAlignment="Center"/>
-                        <TextBlock Margin="14,0" FontSize="20" Text="→" VerticalAlignment="Center"/>
-                        <TextBlock FontSize="20" Text="鼠标旁显示译文" VerticalAlignment="Center"/>
-                    </WrapPanel>
-                </Border>
-                <TextBlock FontSize="15" TextWrapping="Wrap" TextAlignment="Center"
-                           Text="需要一个支持 OpenAI 兼容接口的翻译服务 API Key。Key 只加密保存在这台电脑上。"/>
-            </StackPanel>
-
-            <Grid x:Name="ProviderPage" Visibility="Collapsed">
+        <Border Background="{DynamicResource Brush.SurfaceSubtle}"
+                BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,1,0"
+                Padding="24,28">
+            <Grid>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <TextBlock FontSize="20" FontWeight="SemiBold" Text="选择翻译服务商"/>
-                <ListBox x:Name="ProviderList" Grid.Row="1" Margin="0,14" SelectionChanged="ProviderList_OnSelectionChanged">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <Grid Margin="8" Width="640">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="150"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="100"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock FontWeight="SemiBold" Text="{Binding Name}"/>
-                                <TextBlock Grid.Column="1" Margin="10,0" Foreground="{DynamicResource Brush.TextSecondary}" Text="{Binding Description}"/>
-                                <Button Grid.Column="2" Padding="7,3" Content="去申请 Key" Tag="{Binding KeyUrl}"
-                                        Visibility="{Binding KeyButtonVisibility}" Click="OpenProviderWebsite_OnClick"/>
+                <StackPanel>
+                    <Border Width="48" Height="48" HorizontalAlignment="Left"
+                            Background="{DynamicResource Brush.Primary}"
+                            CornerRadius="{DynamicResource Radius.Large}"
+                            Effect="{DynamicResource Effect.CardGlow}">
+                        <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   FontFamily="{DynamicResource Font.Display}" FontSize="22"
+                                   FontWeight="SemiBold" Foreground="{DynamicResource Brush.OnAccent}"
+                                   Text="译" />
+                    </Border>
+                    <TextBlock Margin="0,16,0,0" FontFamily="{DynamicResource Font.Display}"
+                               FontSize="{DynamicResource Size.Title}" FontWeight="SemiBold"
+                               Text="CtrlTranslator" />
+                    <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource Brush.TextTertiary}"
+                               FontSize="{DynamicResource Size.BodySmall}" Text="让阅读不中断" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" VerticalAlignment="Center">
+                    <Border Height="3" Margin="0,0,0,14" Background="{DynamicResource Brush.Primary}"
+                            CornerRadius="2" />
+                    <TextBlock x:Name="StepText" FontSize="{DynamicResource Size.Title}"
+                               FontWeight="SemiBold" Text="第 1 / 4 步" />
+                    <TextBlock Margin="0,7,0,0" Foreground="{DynamicResource Brush.TextSecondary}"
+                               FontSize="{DynamicResource Size.BodySmall}" TextWrapping="Wrap"
+                               Text="只需几分钟，完成后即可在任意程序中划词翻译。" />
+                </StackPanel>
+
+                <TextBlock Grid.Row="2" Foreground="{DynamicResource Brush.TextTertiary}"
+                           FontSize="{DynamicResource Size.Caption}" TextWrapping="Wrap"
+                           Text="API Key 使用 Windows 账户加密，仅保存在本机。" />
+            </Grid>
+        </Border>
+
+        <Grid Grid.Column="1" Margin="32,28,32,24">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock FontFamily="{DynamicResource Font.Display}"
+                       FontSize="{DynamicResource Size.BodySmall}"
+                       Foreground="{DynamicResource Brush.AccentSecondary}"
+                       FontWeight="SemiBold" Text="初次设置" />
+
+            <Grid Grid.Row="1" Margin="0,18,0,18">
+                <StackPanel x:Name="WelcomePage" VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource PageTitle}" FontSize="{DynamicResource Size.Display}"
+                               TextWrapping="Wrap" Text="选中，双击，立刻读懂" />
+                    <TextBlock Style="{StaticResource PageCaption}"
+                               Text="CtrlTranslator 在鼠标旁直接呈现译文，不切换窗口，也不打断你的阅读节奏。" />
+                    <Border Padding="20" Background="{DynamicResource Brush.SurfaceRaised}"
+                            BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
+                            CornerRadius="{DynamicResource Radius.Large}">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="40" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                <Border Width="32" Height="32" Background="{DynamicResource Brush.AccentSubtle}"
+                                        CornerRadius="{DynamicResource Radius.Small}">
+                                    <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource Brush.Accent}" FontWeight="SemiBold" Text="01" />
+                                </Border>
+                                <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="在任意程序中选中文字" />
                             </Grid>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-                <TextBlock Grid.Row="2" Padding="10" Background="{DynamicResource Brush.WarningBg}" Foreground="{DynamicResource Brush.Warning}" TextWrapping="Wrap"
-                           Text="如果连接失败，请到服务商官网核对最新的接口地址和模型名。"/>
-            </Grid>
-
-            <!-- 输入控件一律用 MinHeight 而不是 Height：写死高度时，
-                 内容比"高度减去内边距"高一点点就会被裁掉底部，中文字体尤其容易踩到。 -->
-            <StackPanel x:Name="CredentialsPage" Visibility="Collapsed">
-                <TextBlock FontSize="20" FontWeight="SemiBold" Text="填写连接信息"/>
-                <TextBlock x:Name="CredentialsProviderText" Margin="0,8,0,0" TextWrapping="Wrap"
-                           Foreground="{DynamicResource Brush.TextSecondary}"/>
-
-                <TextBlock Margin="0,20,0,5" Text="API Key"/>
-                <DockPanel>
-                    <Button x:Name="ApplyKeyButton" DockPanel.Dock="Right" Margin="10,0,0,0" Padding="13,6"
-                            Content="去申请 Key" Click="ApplyKeyButton_OnClick"/>
-                    <PasswordBox x:Name="ApiKeyBox" MinHeight="34" Padding="8,7"/>
-                </DockPanel>
-
-                <TextBlock Margin="0,16,0,5" Text="模型"/>
-                <DockPanel>
-                    <Button DockPanel.Dock="Right" Margin="10,0,0,0" Padding="13,6" Content="拉取可用模型"
-                            Click="FetchModelsButton_OnClick"/>
-                    <ComboBox x:Name="ModelBox" MinHeight="34" Padding="8,6" IsEditable="True"/>
-                </DockPanel>
-                <TextBlock Margin="0,6,0,0" TextWrapping="Wrap"
-                           FontSize="{DynamicResource Size.BodySmall}"
-                           Foreground="{DynamicResource Brush.TextTertiary}"
-                           Text="下拉里是这家常用的几个模型，直接选一个就行。想用别的可以手输，或点「拉取可用模型」看完整列表（要等几秒）。"/>
-
-                <!-- 已知服务商的地址由预设决定，不让用户填 —— 填错地址是新手最常见的卡点。
-                     只有「自定义」才露出可编辑的输入框。 -->
-                <StackPanel x:Name="KnownBaseUrlPanel" Margin="0,16,0,0">
-                    <TextBlock Margin="0,0,0,4" Foreground="{DynamicResource Brush.TextTertiary}"
-                               FontSize="{DynamicResource Size.BodySmall}" Text="服务地址（已自动填好，无需修改）"/>
-                    <TextBlock x:Name="BaseUrlDisplayText" TextWrapping="Wrap"
-                               FontFamily="{DynamicResource Font.Mono}"
-                               FontSize="{DynamicResource Size.BodySmall}"
-                               Foreground="{DynamicResource Brush.TextSecondary}"/>
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="40" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                <Border Width="32" Height="32" Background="{DynamicResource Brush.AccentSubtle}"
+                                        CornerRadius="{DynamicResource Radius.Small}">
+                                    <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource Brush.Accent}" FontWeight="SemiBold" Text="02" />
+                                </Border>
+                                <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="快速双击 Ctrl 键" />
+                            </Grid>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="40" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                <Border Width="32" Height="32" Background="{DynamicResource Brush.AccentSubtle}"
+                                        CornerRadius="{DynamicResource Radius.Small}">
+                                    <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource Brush.Accent}" FontWeight="SemiBold" Text="03" />
+                                </Border>
+                                <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="在鼠标旁查看译文" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
-                <StackPanel x:Name="CustomBaseUrlPanel" Margin="0,16,0,0" Visibility="Collapsed">
-                    <TextBlock Margin="0,0,0,5" Text="服务地址"/>
-                    <TextBox x:Name="BaseUrlBox" MinHeight="34" Padding="8,7"/>
-                    <TextBlock Margin="0,5,0,0" TextWrapping="Wrap"
-                               FontSize="{DynamicResource Size.BodySmall}"
-                               Foreground="{DynamicResource Brush.TextTertiary}"
-                               Text="填写任意 OpenAI 兼容接口的地址，例如 https://api.example.com/v1。"/>
-                </StackPanel>
-
-                <TextBlock x:Name="CredentialsStatusText" Margin="0,16,0,0"
-                           Foreground="{DynamicResource Brush.Danger}" TextWrapping="Wrap"/>
-            </StackPanel>
-
-            <Grid x:Name="TestPage" Visibility="Collapsed">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
-                <TextBlock FontSize="20" FontWeight="SemiBold" Text="测试翻译服务"/>
-                <Border Grid.Row="1" Margin="0,18" Padding="18" Background="{DynamicResource Brush.SurfaceSubtle}" CornerRadius="8">
+                <Grid x:Name="ProviderPage" Visibility="Collapsed">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
                     <StackPanel>
-                        <TextBlock FontWeight="SemiBold" Text="测试内容：Hello, world."/>
-                        <TextBlock x:Name="TestStatusText" Margin="0,12,0,0" TextWrapping="Wrap" Text="准备连接…"/>
-                        <TextBlock x:Name="TestResultText" Margin="0,12,0,0" FontSize="18" TextWrapping="Wrap"/>
+                        <TextBlock Style="{StaticResource PageTitle}" Text="选择翻译服务商" />
+                        <TextBlock Style="{StaticResource PageCaption}" Margin="0,0,0,8"
+                                   Text="选择你已经拥有 API Key 的服务。以后还能在设置中添加备用服务商。" />
                     </StackPanel>
-                </Border>
-                <StackPanel x:Name="ReadyPanel" Grid.Row="2" Visibility="Collapsed">
-                    <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Success}"
-                               TextWrapping="Wrap"
-                               Text="✅ CtrlTranslator 已就绪。在任意程序里选中文字，快速双击 Ctrl 试试。"/>
-                    <TextBlock Margin="0,10,0,0" TextWrapping="Wrap"
-                               Foreground="{DynamicResource Brush.TextSecondary}"
-                               Text="以后可以在「设置 → 服务商档案」里再加几个备用服务商。主服务商挂掉时，划词会自动改用备用，你基本察觉不到。"/>
-                </StackPanel>
-                <StackPanel x:Name="TestFailureActions" Grid.Row="3" Margin="0,16,0,0" Orientation="Horizontal" Visibility="Collapsed">
-                    <Button Content="返回修改" Padding="13,6" Click="BackFromFailureButton_OnClick"/>
-                    <Button x:Name="DiagnosticsButton" Margin="10,0,0,0" Content="详细诊断" Padding="13,6"
-                            Click="DiagnosticsButton_OnClick"/>
-                </StackPanel>
-                <ScrollViewer Grid.Row="4" Margin="0,14,0,0" VerticalScrollBarVisibility="Auto">
-                    <ItemsControl x:Name="DiagnosticsList" ItemTemplate="{StaticResource DiagnosticItemTemplate}"/>
-                </ScrollViewer>
-            </Grid>
-        </Grid>
+                    <ListBox x:Name="ProviderList" Grid.Row="1" Margin="0,10"
+                             Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.Border}"
+                             BorderThickness="1" SelectionChanged="ProviderList_OnSelectionChanged">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="12,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="128" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+                                    <TextBlock Grid.Column="1" Margin="12,0" Foreground="{DynamicResource Brush.TextSecondary}"
+                                               TextTrimming="CharacterEllipsis" Text="{Binding Description}" />
+                                    <Button Grid.Column="2" Content="申请 Key" Tag="{Binding KeyUrl}"
+                                            Visibility="{Binding KeyButtonVisibility}" Click="OpenProviderWebsite_OnClick" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <Border Grid.Row="2" Padding="12" Background="{DynamicResource Brush.WarningBg}"
+                            BorderBrush="{DynamicResource Brush.Warning}" BorderThickness="1"
+                            CornerRadius="{DynamicResource Radius.Medium}">
+                        <TextBlock Foreground="{DynamicResource Brush.Warning}" TextWrapping="Wrap"
+                                   Text="如果连接失败，请到服务商官网核对最新的接口地址和模型名。" />
+                    </Border>
+                </Grid>
 
-        <DockPanel Grid.Row="2">
-            <Button x:Name="SkipButton" Content="暂时跳过" Padding="14,7" Click="SkipButton_OnClick"/>
-            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                <Button x:Name="BackButton" Width="90" Margin="0,0,10,0" Content="上一步" IsEnabled="False"
-                        Click="BackButton_OnClick"/>
-                <Button x:Name="NextButton" Width="100" Content="下一步" Click="NextButton_OnClick"/>
-                <Button x:Name="FinishButton" Width="100" Content="完成" Visibility="Collapsed" IsEnabled="False"
-                        Click="FinishButton_OnClick"/>
-            </StackPanel>
-        </DockPanel>
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              Visibility="{Binding Visibility, ElementName=CredentialsPage}">
+                    <StackPanel x:Name="CredentialsPage" Visibility="Collapsed">
+                        <TextBlock Style="{StaticResource PageTitle}" Text="填写连接信息" />
+                        <TextBlock x:Name="CredentialsProviderText" Style="{StaticResource PageCaption}" />
+
+                        <TextBlock Margin="0,0,0,6" Text="API Key" />
+                        <DockPanel>
+                            <Button x:Name="ApplyKeyButton" DockPanel.Dock="Right" Margin="10,0,0,0"
+                                    Content="去申请 Key" Click="ApplyKeyButton_OnClick" />
+                            <PasswordBox x:Name="ApiKeyBox" />
+                        </DockPanel>
+
+                        <TextBlock Margin="0,18,0,6" Text="模型" />
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Margin="10,0,0,0" Content="拉取可用模型"
+                                    Click="FetchModelsButton_OnClick" />
+                            <ComboBox x:Name="ModelBox" IsEditable="True" />
+                        </DockPanel>
+                        <TextBlock Margin="0,7,0,0" TextWrapping="Wrap"
+                                   FontSize="{DynamicResource Size.BodySmall}"
+                                   Foreground="{DynamicResource Brush.TextTertiary}"
+                                   Text="可直接选择常用模型，也可以手动输入；拉取完整列表可能需要几秒。" />
+
+                        <StackPanel x:Name="KnownBaseUrlPanel" Margin="0,18,0,0">
+                            <TextBlock Margin="0,0,0,5" Foreground="{DynamicResource Brush.TextTertiary}"
+                                       FontSize="{DynamicResource Size.BodySmall}" Text="服务地址（已自动配置）" />
+                            <Border Padding="12,9" Background="{DynamicResource Brush.SurfaceSubtle}"
+                                    BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
+                                    CornerRadius="{DynamicResource Radius.Small}">
+                                <TextBlock x:Name="BaseUrlDisplayText" TextWrapping="Wrap"
+                                           FontFamily="{DynamicResource Font.Mono}"
+                                           FontSize="{DynamicResource Size.BodySmall}"
+                                           Foreground="{DynamicResource Brush.TextSecondary}" />
+                            </Border>
+                        </StackPanel>
+
+                        <StackPanel x:Name="CustomBaseUrlPanel" Margin="0,18,0,0" Visibility="Collapsed">
+                            <TextBlock Margin="0,0,0,6" Text="服务地址" />
+                            <TextBox x:Name="BaseUrlBox" />
+                            <TextBlock Margin="0,6,0,0" TextWrapping="Wrap"
+                                       FontSize="{DynamicResource Size.BodySmall}"
+                                       Foreground="{DynamicResource Brush.TextTertiary}"
+                                       Text="填写 OpenAI 兼容接口地址，例如 https://api.example.com/v1。" />
+                        </StackPanel>
+
+                        <TextBlock x:Name="CredentialsStatusText" Margin="0,16,0,0"
+                                   Foreground="{DynamicResource Brush.Danger}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </ScrollViewer>
+
+                <Grid x:Name="TestPage" Visibility="Collapsed">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource PageTitle}" Text="测试翻译服务" />
+                        <TextBlock Style="{StaticResource PageCaption}" Margin="0,0,0,4"
+                                   Text="我们会发送一句测试文本，确认鉴权、模型和翻译链路正常。" />
+                    </StackPanel>
+                    <Border Grid.Row="1" Margin="0,12,0,0" Padding="18"
+                            Background="{DynamicResource Brush.SurfaceRaised}"
+                            BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
+                            CornerRadius="{DynamicResource Radius.Large}">
+                        <StackPanel>
+                            <TextBlock FontWeight="SemiBold" Text="测试内容：Hello, world." />
+                            <TextBlock x:Name="TestStatusText" Margin="0,12,0,0" TextWrapping="Wrap" Text="准备连接…" />
+                            <TextBlock x:Name="TestResultText" Margin="0,12,0,0"
+                                       FontSize="{DynamicResource Size.Title}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                    <StackPanel x:Name="ReadyPanel" Grid.Row="2" Margin="0,16,0,0" Visibility="Collapsed">
+                        <DockPanel>
+                            <Border DockPanel.Dock="Left" Width="28" Height="28" Margin="0,0,10,0"
+                                    Background="{DynamicResource Brush.SuccessBg}" CornerRadius="14">
+                                <Path Width="14" Height="14" Data="{DynamicResource Icon.Check}"
+                                      Stroke="{DynamicResource Brush.Success}" StrokeThickness="1.8"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                            </Border>
+                            <TextBlock VerticalAlignment="Center" FontSize="{DynamicResource Size.Title}"
+                                       FontWeight="SemiBold" Foreground="{DynamicResource Brush.Success}"
+                                       TextWrapping="Wrap" Text="CtrlTranslator 已就绪" />
+                        </DockPanel>
+                        <TextBlock Margin="38,8,0,0" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource Brush.TextSecondary}"
+                                   Text="在任意程序里选中文字，快速双击 Ctrl 试试。以后可在服务商档案中添加备用服务。" />
+                    </StackPanel>
+                    <StackPanel x:Name="TestFailureActions" Grid.Row="3" Margin="0,16,0,0"
+                                Orientation="Horizontal" Visibility="Collapsed">
+                        <Button Content="返回修改" Click="BackFromFailureButton_OnClick" />
+                        <Button x:Name="DiagnosticsButton" Margin="10,0,0,0" Content="详细诊断"
+                                Click="DiagnosticsButton_OnClick" />
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="4" Margin="0,14,0,0" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="DiagnosticsList" ItemTemplate="{StaticResource DiagnosticItemTemplate}" />
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
+
+            <DockPanel Grid.Row="2">
+                <Button x:Name="SkipButton" Style="{StaticResource Button.Ghost}"
+                        Content="暂时跳过" Click="SkipButton_OnClick" />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button x:Name="BackButton" Width="96" Margin="0,0,10,0"
+                            Content="上一步" IsEnabled="False" Click="BackButton_OnClick" />
+                    <Button x:Name="NextButton" Width="112" Style="{StaticResource Button.Primary}"
+                            Content="下一步" Click="NextButton_OnClick" />
+                    <Button x:Name="FinishButton" Width="112" Style="{StaticResource Button.Primary}"
+                            Content="完成" Visibility="Collapsed" IsEnabled="False"
+                            Click="FinishButton_OnClick" />
+                </StackPanel>
+            </DockPanel>
+        </Grid>
     </Grid>
 </Window>
