@@ -90,4 +90,7 @@
     <DropShadowEffect x:Key="Effect.CardGlow"
                       BlurRadius="14" ShadowDepth="2" Opacity="0.12"
                       Color="#000000" />
+    <DropShadowEffect x:Key="Effect.SidebarShadow"
+                      BlurRadius="10" ShadowDepth="3" Direction="0"
+                      Opacity="0.12" Color="#000000" />
 </ResourceDictionary>

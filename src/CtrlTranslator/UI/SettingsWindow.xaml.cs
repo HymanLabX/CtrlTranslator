@@ -32,8 +32,8 @@ public enum SettingsChangeKind
 /// </summary>
 public partial class SettingsWindow : System.Windows.Controls.UserControl
 {
-    private const int ProfilesSectionIndex = 0;
-    private const int ModelParamsSectionIndex = 1;
+    private const int GeneralSectionIndex = 0;
+    private const int ProfilesSectionIndex = 1;
 
     private readonly AppSettings _settings;
     private readonly SettingsStore _settingsStore;
@@ -43,13 +43,16 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
     private readonly UpdateService? _updateService;
     private readonly Action<ReleaseInfo> _showUpdateWindow;
     private readonly DispatcherTimer _triggerSaveTimer;
+    private readonly DispatcherTimer _saveFeedbackTimer;
     private readonly ObservableCollection<DiagnosticResult> _testResults = [];
     private readonly ScrollViewer[] _sections;
+    private readonly System.Windows.Controls.RadioButton[] _sectionTabs;
     private CancellationTokenSource? _modelFetchCancellation;
     private CancellationTokenSource? _testCancellation;
     private DiagnosticRunner? _lastTestRunner;
     private bool _loading = true;
     private bool _apiKeyVisible;
+    private bool _feedbackReady;
     private int _testTapCount;
 
     public SettingsWindow(
@@ -74,21 +77,33 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             DispatcherPriority.Background,
             TriggerSaveTimer_OnTick,
             Dispatcher);
+        _saveFeedbackTimer = new DispatcherTimer(
+            TimeSpan.FromSeconds(2.5),
+            DispatcherPriority.Background,
+            SaveFeedbackTimer_OnTick,
+            Dispatcher);
 
         _sections =
         [
+            GeneralSection,
             ProfilesSection,
-            ModelParamsSection,
             BehaviorSection,
-            TriggerSection,
             PrivacySection,
-            SystemSection
+            AboutSection
+        ];
+        _sectionTabs =
+        [
+            GeneralTabButton,
+            ServiceTabButton,
+            PreferenceTabButton,
+            PrivacyTabButton,
+            AboutTabButton
         ];
         TestResultsList.ItemsSource = _testResults;
 
         LoadControlsFromSettings();
         RefreshProcessList();
-        SelectSection(ProfilesSectionIndex);
+        SelectSection(GeneralSectionIndex);
         _loading = false;
         UpdateExtraRequestBodyValidation();
         UpdateModeButtons();
@@ -99,7 +114,8 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
     {
         if (focusExtraRequestBody)
         {
-            SelectSection(ModelParamsSectionIndex);
+            SelectSection(ProfilesSectionIndex);
+            AdvancedModelSettingsExpander.IsExpanded = true;
             Dispatcher.BeginInvoke(() =>
             {
                 ExtraRequestBodyBox.Focus();
@@ -161,6 +177,31 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
                 ? Visibility.Visible
                 : Visibility.Collapsed;
         }
+
+        if (_sectionTabs[index].IsChecked != true)
+        {
+            _sectionTabs[index].IsChecked = true;
+        }
+    }
+
+    private void SettingsTab_OnChecked(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded || sender is not System.Windows.Controls.RadioButton { Tag: string tag }
+            || !int.TryParse(tag, CultureInfo.InvariantCulture, out int index))
+        {
+            return;
+        }
+
+        SelectSection(index);
+    }
+
+    private void SettingsView_OnLoaded(object sender, RoutedEventArgs e)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            _feedbackReady = true;
+            ShowIdleSaveStatus();
+        }, DispatcherPriority.ContextIdle);
     }
 
     private void LoadControlsFromSettings()
@@ -191,7 +232,7 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
         PopupMaxHeightBox.Text = _settings.PopupMaxHeight.ToString("0.##", CultureInfo.CurrentCulture);
         StreamFallbackDelayBox.Text = _settings.StreamFallbackDelayMs.ToString(CultureInfo.CurrentCulture);
 
-        AboutVersionText.Text = $"CtrlTranslator v{UpdateChecker.CurrentVersion.ToString(3)}";
+        AboutVersionText.Text = $"v{UpdateChecker.CurrentVersion.ToString(3)}";
         AutoCheckUpdatesCheckBox.IsChecked = _settings.AutoCheckUpdates;
         UpdateStatusText.Text = _updateService?.PendingRelease is { } pending
             ? $"发现新版本 {pending.Version.ToString(3)}，点「检查更新」可以立即安装。"
@@ -328,10 +369,10 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
 
             Logger.SetApiKeys(_settings.Profiles.Select(item => item.ApiKey));
             Logger.Info("设置", "设置窗口中的修改已保存并立即生效。");
-            StatusText.SetResourceReference(
-                System.Windows.Controls.TextBlock.ForegroundProperty,
-                "Brush.Success");
-            StatusText.Text = "已保存，设置已立即生效。";
+            if (_feedbackReady)
+            {
+                ShowTemporaryStatus("已自动保存");
+            }
             if (profileNameChanged)
             {
                 RefreshProfiles();
@@ -416,7 +457,10 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
         _testResults.Clear();
         _lastTestRunner = null;
         CopyReportButton.IsEnabled = false;
-        TestStatusText.Text = "逐项检查配置、网络、鉴权、模型、翻译链路、语音、数据库、快捷键和权限，一眼看出卡在哪一环。";
+        CopyReportButton.Visibility = Visibility.Collapsed;
+        TestProgressBar.Visibility = Visibility.Collapsed;
+        TestProfileButton.Content = "开始检测";
+        TestStatusText.Text = "检查配置、网络、鉴权、模型和翻译链路，定位连接问题。";
     }
 
     private void UpdateFailureCard(ApiProfile profile)
@@ -548,7 +592,7 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             _settings.Profiles.Insert(target, profile);
             RefreshProfiles(profile.Id);
             SaveAll();
-            StatusText.Text = "顺序已保存。列表顺序就是降级顺序。";
+            ShowTemporaryStatus("顺序已保存，列表顺序也是自动降级顺序");
         });
     }
 
@@ -564,7 +608,7 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             _settings.CurrentProfileId = profile.Id;
             RefreshProfiles(profile.Id);
             SaveAll();
-            StatusText.Text = $"当前翻译服务已切换为「{profile.Name}」。";
+            ShowTemporaryStatus($"当前翻译服务已切换为「{profile.Name}」");
         });
     }
 
@@ -580,7 +624,7 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             profile.ClearFailure();
             RefreshProfiles(profile.Id);
             SaveAll();
-            StatusText.Text = $"档案「{profile.Name}」的失效标记已解除，下次划词会重新尝试它。";
+            ShowTemporaryStatus($"已解除档案「{profile.Name}」的失效标记");
         });
     }
 
@@ -618,10 +662,12 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
 
         _testResults.Clear();
         CopyReportButton.IsEnabled = false;
+        CopyReportButton.Visibility = Visibility.Collapsed;
+        TestProgressBar.Visibility = Visibility.Visible;
         _testCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         TestProfileButton.IsEnabled = false;
-        TestProfileButton.Content = "测试中…";
-        TestStatusText.Text = $"正在测试档案「{profile.Name}」…";
+        TestProfileButton.Content = "检测中…";
+        TestStatusText.Text = $"正在检测档案「{profile.Name}」…";
 
         try
         {
@@ -638,11 +684,12 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
                     ? $"全部通过，但有 {warnings} 项提醒，可以看一下。"
                     : "全部通过，这个档案可以正常翻译。";
             CopyReportButton.IsEnabled = results.Count > 0;
+            CopyReportButton.Visibility = results.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         catch (OperationCanceledException)
         {
             Logger.Info("服务商测试", "测试已取消或超时。");
-            TestStatusText.Text = "测试被中断或超时了，可以再点一次「测试」。";
+            TestStatusText.Text = "检测被中断或超时了，可以再试一次。";
         }
         catch (Exception exception)
         {
@@ -653,7 +700,8 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
         {
             _testCancellation?.Dispose();
             _testCancellation = null;
-            TestProfileButton.Content = "测试";
+            TestProgressBar.Visibility = Visibility.Collapsed;
+            TestProfileButton.Content = _testResults.Count > 0 ? "重新检测" : "开始检测";
             UpdateProfileButtons();
         }
     }
@@ -668,7 +716,7 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             }
 
             System.Windows.Clipboard.SetText(_lastTestRunner.BuildReport(_testResults));
-            StatusText.Text = "诊断报告已复制（API Key 已脱敏）。";
+            ShowTemporaryStatus("诊断报告已复制（API Key 已脱敏）");
         });
     }
 
@@ -840,10 +888,35 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
 
     private void ShowValidationError(string message)
     {
+        _saveFeedbackTimer.Stop();
         StatusText.SetResourceReference(
             System.Windows.Controls.TextBlock.ForegroundProperty,
             "Brush.Danger");
         StatusText.Text = message;
+    }
+
+    private void ShowTemporaryStatus(string message)
+    {
+        _saveFeedbackTimer.Stop();
+        StatusText.SetResourceReference(
+            System.Windows.Controls.TextBlock.ForegroundProperty,
+            "Brush.Success");
+        StatusText.Text = message;
+        _saveFeedbackTimer.Start();
+    }
+
+    private void SaveFeedbackTimer_OnTick(object? sender, EventArgs e)
+    {
+        _saveFeedbackTimer.Stop();
+        ShowIdleSaveStatus();
+    }
+
+    private void ShowIdleSaveStatus()
+    {
+        StatusText.SetResourceReference(
+            System.Windows.Controls.TextBlock.ForegroundProperty,
+            "Brush.TextTertiary");
+        StatusText.Text = "修改后自动保存";
     }
 
     private string CurrentApiKey() => _apiKeyVisible
@@ -915,8 +988,8 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
         bool isCustom = ProviderPresetCombo.SelectedItem as string == ProviderPresets.CustomName;
         BaseUrlBox.IsReadOnly = !isCustom;
         BaseUrlHintText.Text = isCustom
-            ? "填写任意 OpenAI 兼容接口地址，例如 https://api.example.com/v1。"
-            : "由「服务商预设」自动填充；如需手动填写，请把预设切换为「自定义」。";
+            ? "填写服务商文档提供的 OpenAI 兼容接口地址，例如 https://api.example.com/v1。"
+            : "当前地址由服务商预设自动填写；需要手动修改时，请先把预设切换为“自定义”。";
     }
 
     private void ToggleApiKeyButton_OnClick(object sender, RoutedEventArgs e)
@@ -988,7 +1061,7 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             ModelCombo.ItemsSource = models;
             ModelCombo.Text = currentModel;
             ModelCombo.IsDropDownOpen = true;
-            StatusText.Text = $"已拉取到 {models.Count} 个模型，请从列表中选择。";
+            ShowTemporaryStatus($"已拉取到 {models.Count} 个模型，请从列表中选择");
         }
         catch (OperationCanceledException exception)
         {
@@ -1446,6 +1519,8 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
     private void SettingsView_OnUnloaded(object sender, RoutedEventArgs e)
     {
         _triggerSaveTimer.Stop();
+        _saveFeedbackTimer.Stop();
+        _feedbackReady = false;
         _modelFetchCancellation?.Cancel();
         _modelFetchCancellation?.Dispose();
         _modelFetchCancellation = null;

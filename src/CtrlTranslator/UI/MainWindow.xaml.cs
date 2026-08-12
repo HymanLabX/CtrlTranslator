@@ -30,9 +30,6 @@ public partial class MainWindow : Window
         HistoryGrid.ItemsSource = _records;
         _searchTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         _searchTimer.Tick += SearchTimer_OnTick;
-        // 选择变化时才会写这行字，但刚打开窗口时还没有"变化"，
-        // 不预置的话右侧详情区是一片没有任何说明的空白。
-        MetadataText.Text = "请选择一条记录查看详情";
         Loaded += MainWindow_OnLoaded;
         Closed += MainWindow_OnClosed;
     }
@@ -46,6 +43,7 @@ public partial class MainWindow : Window
     public void ShowHistory()
     {
         AllTabButton.IsChecked = true;
+        RecordsTabButton.IsChecked = true;
         ShowHistoryContent();
     }
 
@@ -54,7 +52,6 @@ public partial class MainWindow : Window
     {
         SettingsTabButton.IsChecked = true;
         ShowSettingsContent();
-        SettingsSectionNav.SelectedIndex = focusExtraRequestBody ? 1 : 0;
         _settingsView.ShowTranslationService(focusExtraRequestBody);
     }
 
@@ -97,9 +94,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 「全部历史 / 我的收藏」切换。IsLoaded 的判断不能去掉 ——
-    /// XAML 里 AllTabButton 带 IsChecked="True"，这个事件会在 InitializeComponent 期间就触发一次，
-    /// 那时候 _repository 还没赋值。
+    /// 一级导航只负责切换“翻译记录 / 设置”，收藏是记录页内部的筛选条件。
     /// </summary>
     private async void HistoryTab_OnChecked(object sender, RoutedEventArgs e)
     {
@@ -119,6 +114,27 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// 「全部记录 / 已收藏」内容筛选。IsLoaded 的判断不能去掉：
+    /// XAML 默认选中项会在 InitializeComponent 期间先触发一次，此时仓库尚未赋值。
+    /// </summary>
+    private async void HistoryFilter_OnChecked(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded)
+        {
+            return;
+        }
+
+        try
+        {
+            await ReloadAsync();
+        }
+        catch (Exception exception)
+        {
+            ShowLoadError(exception);
+        }
+    }
+
     private void HistoryGrid_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         TranslationRecord? record = SelectedRecord;
@@ -126,16 +142,20 @@ public partial class MainWindow : Window
         ResultDetail.Text = record?.ResultText ?? string.Empty;
         if (record is null)
         {
-            MetadataText.Text = "请选择一条记录查看详情";
+            DetailCards.Visibility = Visibility.Collapsed;
+            DetailEmptyState.Visibility = Visibility.Visible;
             return;
         }
+
+        DetailEmptyState.Visibility = Visibility.Collapsed;
+        DetailCards.Visibility = Visibility.Visible;
 
         // 多档案上线后，"这条是谁翻的"是个真实存在的问题，所以在这里补上服务商。
         string provider = string.IsNullOrWhiteSpace(record.ProfileName)
             ? string.Empty
             : $"服务商：{record.ProfileName}　";
         MetadataText.Text =
-            $"{provider}模型：{record.Model}　来源：{record.AppName ?? "未知"}　"
+            $"{provider}模式：{DisplayModeName(record.ModeId)}　模型：{record.Model}　来源程序：{record.AppName ?? "未知"}　"
             + $"耗时：{record.LatencyMilliseconds?.ToString() ?? "未知"} 毫秒　"
             + $"时间：{record.CreatedAt:yyyy-MM-dd HH:mm:ss}";
     }
@@ -248,28 +268,16 @@ public partial class MainWindow : Window
         }
     }
 
-    private void SettingsSectionNav_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (IsLoaded && SettingsSectionNav.SelectedIndex >= 0)
-        {
-            _settingsView.SelectSection(SettingsSectionNav.SelectedIndex);
-        }
-    }
-
     private void ShowHistoryContent()
     {
-        Title = "CtrlTranslator 翻译历史";
         HistoryContent.Visibility = Visibility.Visible;
         SettingsHost.Visibility = Visibility.Collapsed;
-        SettingsSectionNav.Visibility = Visibility.Collapsed;
     }
 
     private void ShowSettingsContent()
     {
-        Title = "CtrlTranslator 设置";
         HistoryContent.Visibility = Visibility.Collapsed;
         SettingsHost.Visibility = Visibility.Visible;
-        SettingsSectionNav.Visibility = Visibility.Visible;
     }
 
     private Task ReloadAsync() => LoadNextPageAsync(reset: true);
@@ -362,4 +370,14 @@ public partial class MainWindow : Window
     }
 
     private TranslationRecord? SelectedRecord => HistoryGrid.SelectedItem as TranslationRecord;
+
+    private static string DisplayModeName(string? modeId) => modeId switch
+    {
+        "auto" => "通用模式",
+        "academic" => "学术科研",
+        "social" => "社交媒体",
+        "business" => "办公邮件",
+        null or "" => "未标注模式",
+        _ => "自定义模式"
+    };
 }
