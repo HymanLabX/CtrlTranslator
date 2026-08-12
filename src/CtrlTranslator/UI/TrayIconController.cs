@@ -305,7 +305,7 @@ public sealed class TrayIconController : IDisposable
         foreach (ApiProfile profile in _settings.Profiles)
         {
             string profileId = profile.Id;
-            Forms.ToolStripMenuItem item = new(profile.IsFailed ? $"⚠ {profile.Name}" : profile.Name)
+            Forms.ToolStripMenuItem item = new(profile.IsFailed ? $"异常 · {profile.Name}" : profile.Name)
             {
                 Tag = profileId,
                 Checked = string.Equals(profileId, _settings.CurrentProfileId, StringComparison.Ordinal),

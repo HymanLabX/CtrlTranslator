@@ -145,7 +145,7 @@ public partial class PopupWindow : Window
         RenderResult(result.ResultText, result.IsWord);
         CopyButton.IsEnabled = true;
         StarButton.IsEnabled = result.RecordId.HasValue;
-        StarButton.Content = result.Starred ? "★" : "☆";
+        StarButton.Content = result.Starred ? "star-filled" : "star";
         ShowFallbackNotice(result);
 
         if (result.ShowReasoningWarning)
@@ -242,7 +242,7 @@ public partial class PopupWindow : Window
 
     private void OnLoadingTick(object? sender, EventArgs e)
     {
-        LoadingText.Text = $"翻译中… {_stopwatch.Elapsed.TotalSeconds:F1}s";
+        LoadingText.Text = $"翻译中… {_stopwatch.Elapsed.TotalSeconds:F1} 秒";
     }
 
     private void MouseHook_OnClickedOutside(object? sender, OutsideClickEventArgs e)
@@ -293,7 +293,7 @@ public partial class PopupWindow : Window
     {
         _isPinned = !_isPinned;
         _mouseHook.SetPinned(_isPinned);
-        PinButton.Content = _isPinned ? "📍" : "📌";
+        PinButton.Content = _isPinned ? "pinned" : "pin";
         PinButton.ToolTip = _isPinned ? "取消钉住" : "钉住";
     }
 
@@ -308,12 +308,12 @@ public partial class PopupWindow : Window
             }
 
             await SetClipboardTextWithRetryAsync(_result.ResultText);
-            CopyButton.Content = "已复制";
+            CopyButton.Content = "copied";
             var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.2) };
             timer.Tick += (_, _) =>
             {
                 timer.Stop();
-                CopyButton.Content = "📋";
+                CopyButton.Content = "copy";
             };
             timer.Start();
         }
@@ -336,8 +336,8 @@ public partial class PopupWindow : Window
             return;
         }
 
-        bool starred = StarButton.Content?.ToString() != "★";
-        StarButton.Content = starred ? "★" : "☆";
+        bool starred = StarButton.Content?.ToString() != "star-filled";
+        StarButton.Content = starred ? "star-filled" : "star";
         StarredChanged?.Invoke(this, new StarredChangedEventArgs(recordId, starred));
     }
 
@@ -441,7 +441,7 @@ public partial class PopupWindow : Window
 
     private void UpdateSpeechButtonState(bool speaking)
     {
-        SpeechButton.Content = speaking ? "⏹" : "🔊";
+        SpeechButton.Content = speaking ? "stop" : "speech";
         SpeechButton.ToolTip = speaking ? "停止朗读" : "朗读原文";
     }
 
@@ -567,7 +567,7 @@ public partial class PopupWindow : Window
         {
             PagePadding = new Thickness(0),
             FontSize = fontSize,
-            LineHeight = fontSize * 1.6
+            LineHeight = fontSize * 1.65
         };
         document.SetResourceReference(TextElement.FontFamilyProperty, "Font.Ui");
         document.SetResourceReference(TextElement.ForegroundProperty, "Brush.Text");

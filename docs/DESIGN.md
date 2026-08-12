@@ -1,28 +1,48 @@
 # CtrlTranslator 视觉设计规格书
 
-> 方向：**克制工具风**（Raycast / Linear 一路）。
-> 目标用户长时间连续阅读英文学术论文，界面必须**耐看、不抢注意力、久看不累**。
-> 本文件与 `SPEC.md` 同级：`SPEC.md` 管功能，本文件管外观。冲突时功能优先。
+> 视觉方向：**ChatGPT 风格的浅色 AI 工作台**。
+> 借鉴其白色内容画布、浅灰导航、克制控件与内容优先的层级，但保留 CtrlTranslator 自己的品牌和桌面工具交互。
+> `SPEC.md` 管功能，本文件管视觉与布局；冲突时功能、稳定性和可用性优先。
 
 ---
 
-## 0. 这次改的是外观，不是功能
+## 0. 改造边界
 
-**这是一次重新蒙皮（re-skin），不是重写。**
+这是视觉重构，不是功能扩张。
 
-- 所有现有功能必须**原样工作**，交互逻辑一行都不许改
-- 不许删改任何事件处理器、不许改窗口的 `ShowActivated` / `Topmost` / `SizeToContent` 等行为属性
-- 不许动 `Toolbar` 的 `Background="Transparent"`（去掉它拖动会失效，这是踩过的坑）
-- 改完之后 `MILESTONES.md` 里所有已通过的验收项必须仍然通过
+- 所有翻译、取词、收藏、朗读、诊断、更新和设置功能保持不变。
+- 可以调整现有功能入口的位置，例如把“历史 / 收藏 / 设置”集中到主窗口侧栏。
+- 不把软件改成聊天界面，不增加消息气泡、输入提示框、对话角色或聊天历史概念。
+- 不复制 OpenAI / ChatGPT 标志；应用继续使用原创“译”字徽标。
+- 不改变浮窗 `ShowActivated`、`Topmost`、`SizeToContent`、外部点击关闭和钉住行为。
+- `Toolbar` 必须保留 `Background="Transparent"`，保证空白拖动区可命中。
+- 不引入第三方 UI、字体、图标或动效依赖。
+- 只提供一套浅色主题，不跟随系统深浅色。
 
 ---
 
-## 1. 设计原则（判断取舍时依据这四条）
+## 1. 设计原则
 
-1. **默认安静，交互才发声。** 图标平时是次要色，悬停才变主色；边框极淡；阴影几乎看不见。
-2. **一处强调色，绝不滥用。** 只有焦点态、当前选中项、主按钮可以用强调色。其余一律灰阶。
-3. **信息密度适中。** 不做大留白的"设计感"，工具要一眼看完；但行距要够，读译文不累。
-4. **不用 emoji。** 全部换成单色矢量图标。emoji 在不同 Windows 版本渲染不一致，且彩色会抢注意力。
+1. **内容优先**：历史原文、译文和当前翻译结果是视觉中心，界面镀铬退居其次。
+2. **中性克制**：黑、白、浅灰构成主色；绿色只表达“已就绪、成功、安全”等状态。
+3. **轻边界**：主要靠留白和浅灰表面分区，边框只做必要的结构提示。
+4. **原生效率**：布局适合鼠标与键盘，长表单可滚动，常用点击目标不小于 36 DIP。
+5. **不是网页**：保留标准 Windows 标题栏、窗口缩放、DPI 和托盘行为。
+
+### 1.1 ui-ux-pro-max 采纳项
+
+- AI-Native UI：减少装饰、突出实时内容和等待状态。
+- Productivity Tool：清晰导航、可预测操作和功能色。
+- WPF：使用 `Grid`、`ScrollViewer`、DIP、矢量 `Path` 和 PerMonitorV2。
+- Accessibility：正文对比度至少 4.5:1，键盘焦点可见，Tab 顺序符合视觉顺序。
+
+### 1.2 明确舍弃
+
+- 不使用旧版暖纸色、米黄色背景和电子墨水质感。
+- 不使用深色主题、紫蓝渐变、霓虹光、玻璃拟态和大面积阴影。
+- 不使用网页营销式巨型标题、大留白或滚动揭示动效。
+- 不使用 emoji、彩色位图图标或 Unicode 字符模拟工具图标。
+- 不使用外部在线字体。
 
 ---
 
@@ -30,328 +50,196 @@
 
 全部定义在 `Themes/Tokens.Light.xaml`。
 
-> **只有一套主题（暖纸色），没有深色模式。**
-> 这是 M7 明确做的取舍：暖纸调本身就是为长时间阅读挑的，再维护一套语义等价的深色
-> 色阶意味着每加一个控件都要调两遍对比度。真需要深色时，重新出一份完整的深色令牌
-> （不是把浅色反过来），而不是临时补几个键。
-
 ### 2.1 颜色
 
-**中性色阶采用暖纸调**（类似电子墨水阅读器）。原因有二：
+| 令牌 | 值 | 用途 |
+|---|---:|---|
+| `Color.Bg` | `#FFFFFF` | 主内容画布与窗口底 |
+| `Color.Surface` | `#FFFFFF` | 列表、卡片、浮窗 |
+| `Color.SurfaceRaised` | `#FFFFFF` | 菜单、提示、详情卡 |
+| `Color.SurfaceSubtle` | `#F7F7F8` | 左侧导航、输入、只读区 |
+| `Color.Border` | `#E5E5E5` | 常规边框、分隔线 |
+| `Color.BorderStrong` | `#D1D1D1` | 输入悬停、浮窗外框 |
+| `Color.Text` | `#171717` | 正文与标题 |
+| `Color.TextSecondary` | `#5D5D5D` | 说明与次要信息 |
+| `Color.TextTertiary` | `#8F8F8F` | 时间、占位、禁用信息 |
+| `Color.Accent` | `#171717` | 主按钮、焦点、选中条 |
+| `Color.AccentHover` | `#2F2F2F` | 主操作悬停 |
+| `Color.AccentPressed` | `#000000` | 主操作按下 |
+| `Color.AccentSubtle` | `#ECECEC` | 选中项背景 |
+| `Color.AccentSecondary` | `#0D8F72` | AI / 安全 / 就绪辅助色 |
+| `Color.Hover` | `#F3F3F3` | 通用悬停 |
+| `Color.Pressed` | `#E8E8E8` | 通用按下 |
+| `Color.Success` | `#0D8F72` | 成功 |
+| `Color.SuccessBg` | `#E8F7F2` | 成功提示底 |
+| `Color.Warning` | `#9A6700` | 警告 |
+| `Color.WarningBg` | `#FFF8E6` | 警告提示底 |
+| `Color.Danger` | `#D00E17` | 错误与危险操作 |
+| `Color.DangerBg` | `#FFF0F1` | 错误提示底 |
+| `Color.OnAccent` | `#FFFFFF` | 黑色主按钮上的文字 |
 
-1. 浮窗要浮在**纯白的 Word / PDF 文档**上，冷白底会和文档融为一体、看不见边界
-2. 主场景是长时间连续阅读，暖调减少蓝光感知，比冷灰更耐看
-
-> ⚠️ 不要用网上流传的"绿豆沙护眼色" `#C7EDCC`，它饱和度过高、会压低文字对比度，
-> 长时间读反而更累。
-
-| 令牌键 | 值 | 用途 |
-|---|---|---|
-| `Color.Bg` | `#F7F3EC` | 窗口底（比 Surface 略深，做层次） |
-| `Color.Surface` | `#FBF8F3` | **浮窗**、卡片 |
-| `Color.SurfaceSubtle` | `#F2EDE4` | 输入框、只读区 |
-| `Color.Border` | `#E0D8CA` | 常规边框、分隔线 |
-| `Color.BorderStrong` | `#CFC5B4` | 输入框边框、**浮窗外框** |
-| `Color.Text` | `#1F1B16` | 正文（暖黑，不是纯黑） |
-| `Color.TextSecondary` | `#6E655A` | 次要说明、图标默认色 |
-| `Color.TextTertiary` | `#9A9086` | 占位符、禁用态 |
-| `Color.Accent` | `#4F7DF3` | 强调 |
-| `Color.AccentHover` | `#3D6AE0` | 强调悬停 |
-| `Color.AccentSubtle` | `#EFF4FE` | 强调色的浅底 |
-| `Color.Hover` | `#F4F4F5` | 悬停覆盖层 |
-| `Color.Pressed` | `#E4E4E7` | 按下覆盖层 |
-| `Color.Success` | `#16A34A` | 诊断 ✓ |
-| `Color.Warning` | `#B45309` | 警告文字 |
-| `Color.WarningBg` | `#FEF6E7` | 警告条底 |
-| `Color.Danger` | `#DC2626` | 错误文字、诊断 ✗ |
-| `Color.DangerBg` | `#FEF0F0` | 错误条底 |
-
-每个颜色令牌都要同时提供 `SolidColorBrush` 版本，键名为 `Brush.Xxx`
-（例如 `Brush.Text`），XAML 里一律引用画笔而非颜色。
-
-> ⛔ **代码里禁止出现任何硬编码颜色。**
-> 现有的 `PopupWindow.xaml.cs` 里有 `Color.FromRgb(35, 37, 41)` 之类，必须全部清掉，
-> 改为 `(SolidColorBrush)FindResource("Brush.Surface")` 这种取法。
+每个颜色都要提供 `Brush.*`。窗口和代码动态内容只能引用资源，禁止硬编码颜色。
 
 ### 2.2 字体
 
-不依赖任何需要额外安装的字体，全部用系统自带并给出回退链。
+| 令牌 | 字体 |
+|---|---|
+| `Font.Ui` | `Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI, Microsoft YaHei` |
+| `Font.Display` | `Segoe UI Variable Display, Segoe UI, Microsoft YaHei UI` |
+| `Font.Mono` | `Cascadia Mono, Consolas, Courier New` |
 
-| 令牌键 | 值 | 用途 |
-|---|---|---|
-| `Font.Ui` | `Segoe UI, Microsoft YaHei UI, Microsoft YaHei` | 所有界面文字 |
-| `Font.Mono` | `Cascadia Mono, Consolas, Courier New` | 音标、JSON 编辑框、诊断报告 |
+| 令牌 | 字号 | 用途 |
+|---|---:|---|
+| `Size.Caption` | 11 | 时间、状态元信息 |
+| `Size.BodySmall` | 12 | 辅助说明 |
+| `Size.Body` | 14 | 默认正文和按钮 |
+| `Size.BodyLarge` | 15 | 浮窗译文 |
+| `Size.Title` | 17 | 卡片和品牌标题 |
+| `Size.Heading` | 22 | 页面标题 |
+| `Size.Display` | 30 | 欢迎页主标题 |
 
-| 令牌键 | 字号 | 字重 | 用途 |
-|---|---|---|---|
-| `Size.Caption` | 11 | Normal | 辅助说明、时间戳 |
-| `Size.BodySmall` | 12 | Normal | 表单标签、列表次要行 |
-| `Size.Body` | 13 | Normal | 界面正文、按钮文字 |
-| `Size.BodyLarge` | 14 | Normal | **浮窗译文默认值**（受设置项 10–24 控制） |
-| `Size.Title` | 15 | SemiBold | 分组标题 |
-| `Size.Heading` | 18 | SemiBold | 窗口主标题、向导页标题 |
+- 默认正文行距 1.45；浮窗译文行距 1.65。
+- 字重仅用 Normal / Medium / SemiBold。
 
-**行距**：浮窗译文 `LineHeight = 字号 × 1.6`；其余界面文字 1.4。
-译文是要连续阅读的，行距不能按普通 UI 给。
+### 2.3 间距、圆角和尺寸
 
-### 2.3 间距与圆角
+- 间距尺度：`4 / 8 / 12 / 16 / 20 / 24 / 32 / 40 / 48`。
+- 圆角：输入 8；普通按钮 10；卡片 14；浮窗 16；分段胶囊 999。
+- 普通按钮最小高度 38；主按钮 40；图标按钮 36×36。
+- 输入框最小高度 40；CheckBox 命中高度至少 32。
+- 列表行最小高度 64；导航项最小高度 44。
 
-间距只用这几档：`4 / 8 / 12 / 16 / 20 / 24 / 32`。不要出现 5、7、13 这种数。
+### 2.4 阴影和动效
 
-| 令牌键 | 值 | 用途 |
-|---|---|---|
-| `Radius.Small` | 4 | 按钮、输入框、标签 |
-| `Radius.Medium` | 8 | 卡片、提示条、列表项 |
-| `Radius.Large` | 10 | 浮窗外壳 |
-
-### 2.4 阴影
-
-只有浮窗有阴影，其余窗口一律无阴影（靠边框区分层次）。
-
-```xml
-<DropShadowEffect BlurRadius="24" ShadowDepth="4" Direction="270"
-                  Opacity="0.18" Color="#000000" />
-```
-
-浮窗外框用 **1.5px** `Brush.BorderStrong`（不是 1px 的 `Brush.Border`）。
-浮窗要压在别的程序窗口上，边界必须足够明确 —— 实测 1px 淡边框在白色 Word 文档上
-几乎看不见，浮窗像是"糊"在文档里。
-
-### 2.5 动效
-
-**克制**。只做两件事，其余一律不加动画：
-
-- 悬停/按下的背景色过渡：**120ms**，`CubicEase / EaseOut`
-- 浮窗出现时的淡入：**140ms**，仅 `Opacity` 从 0 到 1，**不要位移、不要缩放**
-
-> 浮窗出现频繁（每次划词都出现），任何位移或缩放动画重复几百次后都会烦人。
+- 普通卡片不使用阴影，以白底、浅灰边框和留白分层。
+- 浮窗使用轻阴影：模糊 28、深度 6、透明度 0.2。
+- 悬停背景过渡 160ms；按下即时反馈。
+- 浮窗仅做 160ms 透明度淡入，不位移、不缩放、不弹跳。
+- 加载环 800ms 匀速旋转；不做其他循环装饰动画。
 
 ---
 
-## 3. 控件规范
-
-全部定义在 `Themes/Controls.xaml`。每个控件都要覆盖 `Normal / Hover / Pressed / Disabled / Focused` 五态。
+## 3. 控件系统
 
 ### 3.1 按钮
 
-四个变体，用 `Style` 的 `x:Key` 区分：
-
-| 样式键 | 外观 | 用在哪 |
+| 样式 | 外观 | 用途 |
 |---|---|---|
-| `Button.Primary` | 强调色实底、白字、圆角 4 | 「保存」「完成」「立即关闭思考模式」 |
-| `Button.Secondary` | 透明底、1px `Border` 边框、正文色 | 「取消」「重试」「去设置」 |
-| `Button.Ghost` | 无边框无底，悬停才出 `Hover` 底 | 列表内的次要操作 |
-| `Button.Icon` | 28×28 方形、无边框、只有图标 | **浮窗工具条的五个按钮** |
+| `Button.Primary` | 近黑实底、白字 | 当前页面唯一主操作 |
+| `Button.Secondary` | 白底、浅灰边框 | 普通操作 |
+| `Button.Ghost` | 透明底，悬停浅灰 | 侧栏和弱操作 |
+| `Button.Icon` | 36×36、单色图标 | 浮窗和详情快捷操作 |
 
-统一规则：
-
-- 高度：普通按钮 `28`，图标按钮 `28×28`
-- 内边距：普通按钮 `12,0`
-- 禁用态：`Opacity = 0.4`，且**不响应悬停**
-- 焦点态：外描 1px `Brush.Accent`，**不要用系统默认的虚线焦点框**
-- **删除所有默认 WPF 按钮外观**（那层灰色渐变和立体边框是"原始感"的最大来源）
+- 五态齐全：Normal / Hover / Pressed / Disabled / Focused。
+- 键盘焦点使用清晰的近黑描边，不显示系统虚线框。
+- 禁用透明度 0.42，禁用态不播放悬停动画。
 
 ### 3.2 输入类
 
-`TextBox` / `PasswordBox` / `ComboBox` / `CheckBox` / `Slider` 全部重写模板：
+- `SurfaceSubtle` 背景、1px `Border`、8px 圆角、`10,8` 内边距。
+- 悬停边框 `BorderStrong`；聚焦边框 2px `Accent`。
+- 输入值用 `Text`，占位和说明用 `TextTertiary`。
+- JSON 和 Prompt 编辑框使用 `Font.Mono` 并保留滚动条。
 
-- 输入框：`SurfaceSubtle` 底、1px `Border` 边框、圆角 4、内边距 `8,6`
-- 聚焦时边框变 `Brush.Accent`，**不要外发光**
-- `CheckBox`：16×16 方框，圆角 3；勾选时填充 `Accent` + 白色对勾图标
-- 占位符文字用 `TextTertiary`
+### 3.3 左侧导航
 
-### 3.3 TabControl（设置窗口）
+- 主窗口侧栏宽 220px；设置侧栏宽 204px。
+- 背景 `SurfaceSubtle`，右侧 1px `Border`。
+- 主窗口依次展示原创“译”字徽标、产品名、翻译历史、我的收藏、设置、就绪状态。
+- 选中项使用 `AccentSubtle`，并通过字重或左侧选中条提供冗余提示。
+- 侧栏只承载现有功能，不增加聊天、语言切换或账号入口。
 
-**不要用默认的立体标签页。** 改成下划线式：
+### 3.4 卡片和列表
 
-```
- 翻译服务   翻译行为   触发方式   隐私与安全   系统
- ━━━━━━━━
-```
+- 卡片白底、1px `Border`、14px 圆角、18–20px 内边距。
+- 历史行间使用 1px 分隔线，不使用交替底色。
+- 悬停 `Hover`；选中 `AccentSubtle` + 左侧 3px `Accent`。
+- 原文 14px，译文 12px，元信息 11px。
+- 所有选中状态都不能只依赖颜色。
 
-- 标签文字：未选中 `TextSecondary`，选中 `Text` 且加 SemiBold
-- 选中项下方 2px `Accent` 下划线，宽度与文字等宽
-- 标签栏下方一条 1px `Border` 分隔线贯穿整个窗口宽度
-- 标签间距 24，无边框无底色
+### 3.5 滚动条和进度条
 
-### 3.4 列表（主窗口历史）
-
-- 行高 `Auto`，内边距 `12,10`
-- 行与行之间 1px `Border` 分隔线，**不要交替行底色**
-- 悬停整行 `Hover` 底，选中行 `AccentSubtle` 底 + 左侧 2px `Accent` 竖条
-- 每行两段：第一行原文（`Text`，13px，单行省略号），第二行译文（`TextSecondary`，12px，单行省略号）
-- 右侧靠边：模式标签 + 时间（`TextTertiary`，11px）+ 星标图标
-
-### 3.5 ScrollBar
-
-默认 WPF 滚动条又宽又丑。重写为：
-
-- 宽度 8，无箭头按钮，无轨道底色
-- 滑块：`BorderStrong` 色，圆角 4，`Opacity 0.5`；悬停 `Opacity 1`
+- 滚动条宽 10，无箭头；滑块中灰，悬停加深。
+- 确定进度使用 6px 近黑进度条。
+- 不确定等待使用旋转环和实时文字。
 
 ---
 
-## 4. 图标
+## 4. 图标系统
 
-### 4.1 规范
-
-- **全部替换掉现有的 emoji**（🔊 ☆ 📋 📌 ✕ 等）
-- 形式：`Path` 矢量，定义在 `Themes/Icons.xaml` 里，键名 `Icon.Xxx`（`Geometry` 资源）
-- 画布：**16×16**；描边宽度 **1.5**；`StrokeLineCap="Round"`、`StrokeLineJoin="Round"`
-- 颜色：**不在图标里写死颜色**，由使用处的 `Foreground` 决定
-- 默认色 `TextSecondary`，悬停 `Text`，激活态（如已收藏、已钉住）用 `Accent`
-
-### 4.2 需要的图标清单
-
-| 键名 | 造型 | 用在哪 |
-|---|---|---|
-| `Icon.Speaker` | 喇叭 + 两道声波弧线 | 浮窗朗读 |
-| `Icon.Stop` | 圆角实心方块 | 朗读中 |
-| `Icon.Star` | 五角星描边 | 收藏（未选中） |
-| `Icon.StarFilled` | 五角星实心 | 收藏（已选中，`Accent` 色） |
-| `Icon.Copy` | 两个错位圆角矩形 | 复制译文 |
-| `Icon.Check` | 对勾 | 复制成功后短暂替换 |
-| `Icon.Pin` | 图钉 | 钉住 |
-| `Icon.Close` | 叉 | 关闭 |
-| `Icon.Search` | 放大镜 | 主窗口搜索框 |
-| `Icon.Trash` | 垃圾桶 | 删除记录 |
-| `Icon.Settings` | 三条带滑块的横线 | 设置入口 |
-| `Icon.Pulse` | 心电波形 | 一键诊断 |
-| `Icon.Refresh` | 环形箭头 | 拉取模型、重试 |
-| `Icon.Download` | 下箭头 + 托盘横线 | 导出 CSV |
-| `Icon.Folder` | 文件夹 | 打开日志/数据文件夹 |
-| `Icon.Warning` | 三角形 + 感叹号 | 警告条 |
-| `Icon.Error` | 圆形 + 叉 | 错误提示 |
-| `Icon.Info` | 圆形 + i | 一般提示 |
+- 图标是 16×16 坐标系 `Geometry`，统一放在 `Themes/Icons.xaml`。
+- 1.5px 圆头圆角描边，颜色由使用处决定。
+- 默认 `TextSecondary`，悬停 `Text`，激活 `Accent`。
+- 不使用 OpenAI 标志，不使用 emoji，不使用在线图标库。
+- 图标按钮必须有简体中文 `ToolTip`。
 
 ---
 
-## 5. 各窗口的具体要求
+## 5. 窗口规范
 
-### 5.1 浮窗（最重要，用户看得最多）
+### 5.1 主窗口
 
-```
-┌──────────────────────────────────────────┐
-│  ♪   ☆   ⧉                    ⌖    ✕    │  ← 28×28 图标按钮，间距 4
-│                                          │     左三个贴左，右两个贴右
-├──────────────────────────────────────────┤  ← 1px Border 分隔线
-│                                          │
-│  残余应变 ε_res 在图 2d 中作为施加应变     │  ← 14px，行距 ×1.6
-│  的函数进行量化。                          │
-│                                          │
-└──────────────────────────────────────────┘
-```
+- 默认 1120×720，最小 900×600。
+- 左侧 220px 导航，右侧白色内容画布。
+- 页面标题“翻译工作台”，下方是搜索框和“导出 CSV”。
+- 内容区左侧历史列表、右侧原文 / 译文详情。
+- 不照搬方向稿中的示例数据、语言选择或快捷键提示。
 
-- 外壳：`Surface` 底（暖纸色 `#FBF8F3`）、**1.5px `BorderStrong` 边框**、圆角 10、阴影按 §2.4
-- 内边距 `16`；工具条与译文之间加 1px 分隔线，上下各留 12
-- **加载态**：不要默认 `ProgressBar`。改为一行居中的 `TextSecondary` 文字
-  「翻译中… 1.2s」，左侧一个 12×12 的旋转圆环（描边 1.5，270° 弧，匀速 800ms 一圈）
-- **词典模式排版**：
-  - 音标行：`Font.Mono`，12px，`TextSecondary`
-  - 词性：SemiBold，`Accent` 色，行内
-  - 释义：正文色
-  - 例句：12px，`TextSecondary`，左侧 2px `Border` 竖线 + 左padding 8
-- **提示条**（警告/错误）：圆角 8，`WarningBg` / `DangerBg` 底，
-  左侧 16×16 图标 + 文字 + 右侧按钮组；文字用 `Warning` / `Danger` 色
+### 5.2 翻译浮窗
 
-### 5.2 设置窗口
+- 白色外壳、1px `BorderStrong`、16px 圆角、轻阴影。
+- 顶部 36px 工具栏，左侧朗读 / 收藏 / 复制，右侧钉住 / 关闭。
+- 工具栏空白区可拖动，分隔线下方显示译文。
+- 译文 15px、行距 1.65；可选择、可滚动。
+- 加载态使用近黑旋转环和“翻译中… 1.2 秒”。
 
-> M5 起改为**左侧导航 + 右侧卡片**，不再是顶部标签页（§3.3 那套下划线标签只剩
-> 历史参考价值）。原因：六个分区横排太挤，而服务商档案列表需要垂直空间。
+### 5.3 设置窗口
 
-- 窗口尺寸 `960×740`，最小 `820×580`
-- 左侧导航栏宽 176，`SurfaceSubtle` 底，右边 1px 分隔线；
-  导航项默认 `TextSecondary`，悬停 `Hover` 底，选中 `AccentSubtle` 底 + `Accent` 字 + SemiBold
-- 右侧内容区按主题分**卡片**：`Surface` 底、1px `Border`、圆角 8、内边距 18、卡片间距 14
-- 每张卡片顶部一行 SemiBold 标题；表单行左列标签宽 145 + 右列控件
-- 每项下方可选一行 `BodySmall` + `TextSecondary` 的说明文字
-- 底部固定状态条：左侧保存状态文字（成功 `Success` / 校验失败 `Danger`）+ 右侧「关闭」按钮，
-  上方 1px 分隔线。**设置是即时保存的，没有「保存」按钮**
+- 默认 1040×780，最小 880×620。
+- 浅灰左侧导航 + 白色内容区 + 白色卡片。
+- 表单标签列约 160px；所有长页可滚动。
+- 底部固定即时保存状态条，不增加保存按钮。
 
-### 5.3 主窗口（历史与收藏）
+### 5.4 首次引导
 
-- 窗口尺寸 `900×620`
-- 顶部：搜索框（带 `Icon.Search` 前缀，占满宽度）+ 右侧「导出 CSV」`Button.Secondary`
-- 「全部历史 / 我的收藏」做成**分段按钮**（两个 `RadioButton` 重写模板），
-  紧贴列表上方。**不要**用 TabControl 再把列表用边距顶到它的内容区上 —— 那样换字号或
-  DPI 就会错位（这是 v1.0 踩过的坑）
-- 下方左右分栏：左 55% 列表（按 §3.4），右 45% 详情
-- 详情区：原文块 + 译文块，中间 1px 分隔线，各自右上角一个复制图标按钮
-- 空状态：居中 `TextTertiary` 文字。三种空要给三种话 ——
-  没记录「还没有翻译记录。选中文字后双击 Ctrl 试试。」／
-  没收藏「还没有收藏。翻译出来后点浮窗上的 ☆ 就能存进这里。」／
-  搜不到「没有匹配的记录。换个关键词试试。」
+- 默认 760×640，不可调整。
+- 左侧浅灰品牌轨道显示进度和隐私说明，右侧完成当前任务。
+- 每页一个主操作；跳过、返回和继续始终键盘可达。
 
-### 5.4 服务商测试结果（设置页内）
+### 5.5 更新窗口
 
-> M5 起诊断没有独立窗口，结果就地展开在「服务商档案」页的卡片里。
-
-- 每项一行：状态图标（✓ `Success` / ✗ `Danger` / ⚠ `Warning`）+ 项目名
-  + 说明文字（`BodySmall`、`TextSecondary`）+ 右侧耗时（`Caption`、`TextTertiary`）
-- 结果逐项实时追加，跑完在卡片顶部给一句总结
-- 卡片右上角「复制诊断报告」`Button.Secondary`，导出的文本里 API Key 必须脱敏
-
-### 5.5 引导向导
-
-- 窗口尺寸 `560×460`，不可调整大小
-- 顶部：步骤指示器，四个圆点 + 连线，当前 `Accent` 实心，已完成 `Accent` 描边，未到 `Border`
-- 中部内容区，标题用 `Size.Heading`
-- 底部：左「跳过设置」`Button.Ghost`，右「上一步」`Button.Secondary` +「下一步」`Button.Primary`
+- 默认 600px 宽，自适应高度。
+- 不使用彩色渐变条；以标题、说明、发布内容和操作区建立层级。
+- 下载进度用近黑进度条；错误使用 `DangerBg` 内联提示。
 
 ---
 
-## 6. 应用图标
+## 6. 可访问性与交付清单
 
-现有图标是简单几何箭头，需要重做。
-
-**造型**：圆角方形徽标（圆角 = 边长 22%），底为 `#4F7DF3 → #3D6AE0` 的 135° 线性渐变，
-内部白色的 **「A」与「文」左右并置**，中间一条细竖线分隔。
-一眼传达"翻译"，且在 16×16 下仍可辨认。
-
-**两个变体**：
-
-| 文件 | 用途 | 差异 |
-|---|---|---|
-| `ctrltranslator.ico` | 正常态 | 如上 |
-| `ctrltranslator-paused.ico` | 划词已暂停 | 底色换成 `#71717A` 灰，整体不透明度 70% |
-
-**尺寸**：一个 `.ico` 内含 `16 / 20 / 24 / 32 / 48 / 64 / 128 / 256` 八种。
-16 和 20 这两档必须**单独手工调整**（细节要减，竖线可去掉），
-直接从 256 缩下来会糊成一团。
-
-**生成方式**：写一个一次性的 C# 或 PowerShell 脚本用 `System.Drawing` 生成，
-脚本放 `tools/generate-icons.ps1`，不要手工画。生成完把 `.ico` 提交进仓库。
+- [ ] 正文对比度至少 4.5:1；大文字至少 3:1。
+- [ ] 所有功能可用键盘到达，Tab 顺序与视觉顺序一致。
+- [ ] 所有按钮有可见焦点，图标按钮有中文 ToolTip。
+- [ ] 选中、成功、警告、错误不只依赖颜色。
+- [ ] 常用点击目标至少 36×36 DIP，主按钮至少 40px 高。
+- [ ] 100% / 125% / 150% / 200% DPI 下无裁切、重叠和位图模糊。
+- [ ] 长内容均位于 `ScrollViewer`，最小窗口尺寸仍可访问。
+- [ ] 等待超过 300ms 时有可见反馈。
+- [ ] `dotnet build -c Release` 为 0 Error / 0 Warning。
+- [ ] 主窗口、设置、向导、更新窗口和浮窗均无 XAML 运行时异常。
 
 ---
 
 ## 7. 实现约束
 
-### 7.1 文件结构
-
 ```
 src/CtrlTranslator/Themes/
-├─ Tokens.Light.xaml      # 设计令牌（Color + Brush + 尺寸）——唯一一套
-├─ Icons.xaml             # 所有 Geometry 图标资源
-└─ Controls.xaml          # 所有控件样式，只引用令牌键，不写死值
+├─ Tokens.Light.xaml
+├─ Icons.xaml
+└─ Controls.xaml
 ```
 
-在 `App.xaml` 中合并。
-
-> 文件名保留 `Tokens.Light` 而不是改成 `Tokens`：将来真要加深色时，
-> 直接并排放一个 `Tokens.Dark.xaml` 即可，不用再动所有引用。
-
-### 7.2 硬性要求
-
-1. **`Controls.xaml` 里不许出现任何字面颜色值**，一律 `{DynamicResource Brush.Xxx}`
-   —— 保持 `DynamicResource`：令牌是运行时查找的，将来加主题切换才不用返工
-2. **所有 `.cs` 文件里不许再有 `Color.FromRgb` / `Brushes.Xxx`**
-3. 改完后 `dotnet build -c Release` **0 警告 0 错误**
-4. 现有全部功能与交互**保持不变**
-
-### 7.3 明确不要做的
-
-- ❌ 不引入任何 UI 框架或图标库（MaterialDesign、HandyControl、MahApps 等一律不许）
-- ❌ 不做圆角窗口以外的异形窗口、不做亚克力/云母材质
-- ❌ 不加除 §2.5 之外的任何动画
-- ❌ 不改任何窗口的行为属性（`ShowActivated`、`Topmost`、`SizeToContent`…）
-- ❌ 不动 `Toolbar` 的 `Background="Transparent"`
+1. `Controls.xaml` 只引用令牌，不出现字面颜色。
+2. 业务窗口引用 `Brush.*`、`Size.*`、`Radius.*` 和公共样式。
+3. C# 动态内容通过 `SetResourceReference` 获取画笔与字体。
+4. 不引入新 NuGet，不使用 WebView、HTML 或第三方 UI / MVVM 框架。
+5. 视觉改动不得影响剪贴板、钩子、网络、数据库、更新和窗口生命周期。
