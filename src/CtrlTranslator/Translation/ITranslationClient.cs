@@ -27,11 +27,18 @@ internal sealed record TranslationStreamUpdate(
     long ElapsedMilliseconds,
     bool SawReasoning);
 
+/// <param name="PromptTokens">
+/// 尽力而为：流式响应里默认<b>不一定</b>带 usage，也不是所有服务商都支持
+/// <c>stream_options.include_usage</c>（Ollama、部分网关会因未知键直接 400）。
+/// 这里只解析对方主动送来的 usage，拿不到就是 null —— 不为了统计去冒险改请求体。
+/// </param>
 internal sealed record TranslationClientResult(
     string Text,
     long FirstTokenLatencyMilliseconds,
     long TotalLatencyMilliseconds,
-    bool SawReasoning);
+    bool SawReasoning,
+    long? PromptTokens = null,
+    long? CompletionTokens = null);
 
 internal enum TranslationConfigurationError
 {

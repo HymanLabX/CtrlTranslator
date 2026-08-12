@@ -3,8 +3,13 @@
 # 用法：在项目根目录打开 PowerShell，执行
 #     .\build.ps1
 #
-# 产物：publish\CtrlTranslator.exe —— 单个文件，双击即用。
-# 目标机器不需要安装 .NET 运行时，拷到任何一台 64 位 Windows 上都能跑。
+# 产物有两个：
+#   publish\CtrlTranslator.exe                自包含单文件，**本地自测用**
+#   installer\output\CtrlTranslator-Setup-*.exe  安装包，**这个才是发给别人的**
+#
+# 为什么只发安装包：裸 exe 没法安全地自我更新（"下载 exe → 替换自己 → 重启"这套
+# 动作在杀毒软件眼里几乎等同蠕虫），而 M6 的一键更新是靠覆盖安装实现的。
+# 裸 exe 仍然会被构建，因为它是安装包的输入，也方便你在本机直接验证打包产物。
 
 $ErrorActionPreference = 'Stop'
 
@@ -60,11 +65,41 @@ $sizeMb = [math]::Round((Get-Item $exe).Length / 1MB, 1)
 
 Write-Host ''
 Write-Host '=== 打包完成 ===' -ForegroundColor Green
-Write-Host "产物：$exe"
+Write-Host "自测用 exe：$exe"
 Write-Host "大小：$sizeMb MB"
 Write-Host ''
-Write-Host '这个 exe 是自包含的：拷到任何一台 64 位 Windows 上双击即可运行，'
-Write-Host '不需要安装 .NET 运行时，也不需要装任何别的东西。'
+Write-Host '这个 exe 是自包含的，拷到任何一台 64 位 Windows 上双击即可运行，'
+Write-Host '适合你本机验证打包产物。但**发给别人请用下面的安装包**——'
+Write-Host '只有装过的版本才能收到程序内的一键更新。' -ForegroundColor DarkGray
+Write-Host ''
+
+# 顺手编一份安装包（装了 Inno Setup 才会跑；没装就跳过，不算失败）。
+$iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+if (-not $iscc) {
+    $defaultIscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+    if (Test-Path $defaultIscc) {
+        $iscc = Get-Item $defaultIscc
+    }
+}
+
+if ($iscc) {
+    Write-Host '检测到 Inno Setup，顺便编译安装包…'
+    $issPath = Join-Path $root 'installer\CtrlTranslator.iss'
+    & $iscc.Source $issPath
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host '安装包编译失败，上面的输出发给 Claude 看看。' -ForegroundColor Yellow
+    } else {
+        $setupExe = Get-ChildItem (Join-Path $root 'installer\output') -Filter 'CtrlTranslator-Setup-*.exe' |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($setupExe) {
+            Write-Host "安装包：$($setupExe.FullName)" -ForegroundColor Green
+        }
+    }
+} else {
+    Write-Host '没检测到 Inno Setup（ISCC.exe），跳过安装包编译。' -ForegroundColor DarkGray
+    Write-Host '想顺便出安装包的话：winget install JRSoftware.InnoSetup' -ForegroundColor DarkGray
+}
+
 Write-Host ''
 
 # 打开产物目录，方便直接把 exe 拖到桌面。

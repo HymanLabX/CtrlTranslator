@@ -74,9 +74,14 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void HistoryTabs_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    /// <summary>
+    /// 「全部历史 / 我的收藏」切换。IsLoaded 的判断不能去掉 ——
+    /// XAML 里 AllTabButton 带 IsChecked="True"，这个事件会在 InitializeComponent 期间就触发一次，
+    /// 那时候 _repository 还没赋值。
+    /// </summary>
+    private async void HistoryTab_OnChecked(object sender, RoutedEventArgs e)
     {
-        if (!ReferenceEquals(e.Source, HistoryTabs) || !IsLoaded)
+        if (!IsLoaded)
         {
             return;
         }
@@ -96,9 +101,20 @@ public partial class MainWindow : Window
         TranslationRecord? record = SelectedRecord;
         SourceDetail.Text = record?.SourceText ?? string.Empty;
         ResultDetail.Text = record?.ResultText ?? string.Empty;
-        MetadataText.Text = record is null
-            ? "请选择一条记录查看详情"
-            : $"模型：{record.Model}　来源：{record.AppName ?? "未知"}　耗时：{record.LatencyMilliseconds?.ToString() ?? "未知"} 毫秒";
+        if (record is null)
+        {
+            MetadataText.Text = "请选择一条记录查看详情";
+            return;
+        }
+
+        // 多档案上线后，"这条是谁翻的"是个真实存在的问题，所以在这里补上服务商。
+        string provider = string.IsNullOrWhiteSpace(record.ProfileName)
+            ? string.Empty
+            : $"服务商：{record.ProfileName}　";
+        MetadataText.Text =
+            $"{provider}模型：{record.Model}　来源：{record.AppName ?? "未知"}　"
+            + $"耗时：{record.LatencyMilliseconds?.ToString() ?? "未知"} 毫秒　"
+            + $"时间：{record.CreatedAt:yyyy-MM-dd HH:mm:ss}";
     }
 
     private async void HistoryGrid_OnScrollChanged(object sender, ScrollChangedEventArgs e)
@@ -223,7 +239,7 @@ public partial class MainWindow : Window
             }
 
             CancellationToken token = _loadCancellation?.Token ?? CancellationToken.None;
-            bool starredOnly = HistoryTabs.SelectedIndex == 1;
+            bool starredOnly = StarredTabButton.IsChecked == true;
             IReadOnlyList<TranslationRecord> page = await _repository.QueryAsync(
                 SearchBox.Text.Trim(), starredOnly, _records.Count, PageSize, token);
             foreach (TranslationRecord record in page)
@@ -231,6 +247,7 @@ public partial class MainWindow : Window
                 _records.Add(record);
             }
             _hasMore = page.Count == PageSize;
+            UpdateEmptyState(starredOnly);
         }
         catch (OperationCanceledException)
         {
@@ -241,6 +258,27 @@ public partial class MainWindow : Window
         {
             _loading = false;
         }
+    }
+
+    /// <summary>
+    /// 空列表时给一句人话，而不是一片空白 —— 空白会让人以为是程序坏了。
+    /// 三种"空"的原因不同，给的下一步也该不同。
+    /// </summary>
+    private void UpdateEmptyState(bool starredOnly)
+    {
+        if (_records.Count > 0)
+        {
+            EmptyStateText.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        bool searching = SearchBox.Text.Trim().Length > 0;
+        EmptyStateText.Text = searching
+            ? "没有匹配的记录。换个关键词试试。"
+            : starredOnly
+                ? "还没有收藏。翻译出来后点浮窗上的 ☆ 就能存进这里。"
+                : "还没有翻译记录。选中文字后双击 Ctrl 试试。";
+        EmptyStateText.Visibility = Visibility.Visible;
     }
 
     private void ShowLoadError(Exception exception)

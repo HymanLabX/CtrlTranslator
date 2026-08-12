@@ -11,7 +11,7 @@ using CtrlTranslator.Settings;
 using CtrlTranslator.Speech;
 using CtrlTranslator.UI;
 using CtrlTranslator.Translation;
-using Microsoft.Win32;
+using CtrlTranslator.Update;
 
 namespace CtrlTranslator;
 
@@ -40,11 +40,11 @@ public partial class App : System.Windows.Application
     private PopupWindow? _popupWindow;
     private SettingsWindow? _settingsWindow;
     private MainWindow? _mainWindow;
-    private DiagnosticWindow? _diagnosticWindow;
     private OnboardingWindow? _onboardingWindow;
+    private UpdateWindow? _updateWindow;
+    private UpdateService? _updateService;
     private SpeechService? _speechService;
     private bool _loggerInitialized;
-    private bool _systemThemeListenerRegistered;
     private int _unhandledExceptionReported;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -73,10 +73,7 @@ public partial class App : System.Windows.Application
             bool isFirstRun = !File.Exists(settingsStore.SettingsPath);
             AppSettings settings = settingsStore.LoadOrCreate();
             _settings = settings;
-            Logger.SetApiKey(settings.ApiKey);
-            ApplyThemeResources();
-            SystemEvents.UserPreferenceChanged += SystemEvents_OnUserPreferenceChanged;
-            _systemThemeListenerRegistered = true;
+            Logger.SetApiKeys(settings.Profiles.Select(profile => profile.ApiKey));
 
             // 朗读服务是全局单例，构造时会枚举 SAPI 语音；无语音时它自己降级，不影响启动。
             _speechService = new SpeechService();
@@ -85,6 +82,7 @@ public partial class App : System.Windows.Application
             _trayIcon.SettingsRequested += TrayIcon_OnSettingsRequested;
             _trayIcon.MainWindowRequested += TrayIcon_OnMainWindowRequested;
             _trayIcon.DiagnosticsRequested += TrayIcon_OnDiagnosticsRequested;
+            _trayIcon.UpdateCheckRequested += TrayIcon_OnUpdateCheckRequested;
             _trayIcon.AboutRequested += TrayIcon_OnAboutRequested;
             if (!string.IsNullOrWhiteSpace(settingsStore.LastWarning))
             {
@@ -108,11 +106,18 @@ public partial class App : System.Windows.Application
             _historyRepository = new HistoryRepository(database);
             _translationService = new TranslationService(
                 () => _settings ?? settings,
-                _historyRepository);
+                _historyRepository,
+                OnProfileMarkedFailed);
 
             _appState = new AppState(settings);
             _textCapture = new TextCapture(Dispatcher);
             InstallKeyboardHook(settings);
+
+            _updateService = new UpdateService(
+                () => _settings ?? settings,
+                Dispatcher,
+                ShowUpdateWindow);
+            _updateService.Start();
 
             Logger.Info("应用", "CtrlTranslator 已启动，托盘图标已显示。");
             if (isFirstRun)
@@ -135,19 +140,15 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         UnregisterGlobalExceptionHandlers();
-        if (_systemThemeListenerRegistered)
-        {
-            SystemEvents.UserPreferenceChanged -= SystemEvents_OnUserPreferenceChanged;
-            _systemThemeListenerRegistered = false;
-        }
 
         try
         {
             _popupWindow?.Close();
             _settingsWindow?.Close();
             _mainWindow?.Close();
-            _diagnosticWindow?.Close();
             _onboardingWindow?.Close();
+            _updateWindow?.Close();
+            _updateService?.Dispose();
             _translationService?.Dispose();
             DisposeKeyboardHook();
         }
@@ -173,6 +174,7 @@ public partial class App : System.Windows.Application
                 _trayIcon.SettingsRequested -= TrayIcon_OnSettingsRequested;
                 _trayIcon.MainWindowRequested -= TrayIcon_OnMainWindowRequested;
                 _trayIcon.DiagnosticsRequested -= TrayIcon_OnDiagnosticsRequested;
+                _trayIcon.UpdateCheckRequested -= TrayIcon_OnUpdateCheckRequested;
                 _trayIcon.AboutRequested -= TrayIcon_OnAboutRequested;
             }
 
@@ -412,7 +414,7 @@ public partial class App : System.Windows.Application
             Logger.Error("取词", "剪贴板在重试后仍不可用。", exception);
             ShowCaptureError(ErrorMessages.FromException(
                 exception,
-                _settings?.Model ?? string.Empty,
+                _settings?.CurrentProfile.Model ?? string.Empty,
                 IsThinkingDisabled()));
         }
         catch (Exception exception)
@@ -485,7 +487,7 @@ public partial class App : System.Windows.Application
             {
                 popup.ShowTranslationError(ErrorMessages.FromException(
                     exception,
-                    _settings?.Model ?? string.Empty,
+                    _settings?.CurrentProfile.Model ?? string.Empty,
                     IsThinkingDisabled()));
             }
         }
@@ -561,7 +563,7 @@ public partial class App : System.Windows.Application
                     _ = StartTranslationAsync(retryPopup.SourceText, retryPopup.AppName);
                     break;
                 case ErrorAction.Diagnostics:
-                    ShowDiagnosticWindow();
+                    ShowProfileTest();
                     break;
                 case ErrorAction.OpenLog:
                     _trayIcon?.OpenLogDirectory();
@@ -660,13 +662,14 @@ public partial class App : System.Windows.Application
                 return;
             }
 
-            string previousExtraRequestBody = _settings.ExtraRequestBody;
-            _settings.ExtraRequestBody = ExtraRequestBodyHelper.SetThinkingDisabled(
+            ApiProfile profile = _settings.CurrentProfile;
+            string previousExtraRequestBody = profile.ExtraRequestBody;
+            profile.ExtraRequestBody = ExtraRequestBodyHelper.SetThinkingDisabled(
                 previousExtraRequestBody,
                 disabled: true);
             if (!_settingsStore.TrySave(_settings, out string? errorMessage))
             {
-                _settings.ExtraRequestBody = previousExtraRequestBody;
+                profile.ExtraRequestBody = previousExtraRequestBody;
                 System.Windows.MessageBox.Show(
                     errorMessage ?? "关闭思考模式的设置没有保存成功，请稍后再试。",
                     "CtrlTranslator",
@@ -728,7 +731,7 @@ public partial class App : System.Windows.Application
 
     private void TrayIcon_OnMainWindowRequested(object? sender, EventArgs e) => ShowMainWindow();
 
-    private void TrayIcon_OnDiagnosticsRequested(object? sender, EventArgs e) => ShowDiagnosticWindow();
+    private void TrayIcon_OnDiagnosticsRequested(object? sender, EventArgs e) => ShowProfileTest();
 
     private void TrayIcon_OnAboutRequested(object? sender, EventArgs e)
     {
@@ -762,7 +765,7 @@ public partial class App : System.Windows.Application
                 + "   刚截图还没粘贴时，请先粘贴完再划词。\n"
                 + "\n"
                 + "更多说明见程序目录下的 README.md。\n"
-                + "遇到问题请先用「设置 → 翻译服务 → 一键诊断」自查。",
+                + "遇到问题请先用「设置 → 服务商档案 → 测试」自查。",
                 "关于 CtrlTranslator",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -816,56 +819,59 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private void ShowDiagnosticWindow() => ShowDiagnosticWindow(_settings);
-
-    private void ShowDiagnosticWindow(AppSettings? diagnosticSettings)
+    /// <summary>
+    /// 造一个针对某个档案的诊断器。M5 之后诊断没有独立窗口了，由设置页的「测试」按钮
+    /// 和引导向导各自就地展示结果。
+    /// </summary>
+    private DiagnosticRunner CreateDiagnosticRunner(ApiProfile profile)
     {
+        AppSettings settings = _settings
+            ?? throw new InvalidOperationException("设置尚未初始化。");
+        HistoryRepository repository = _historyRepository
+            ?? throw new InvalidOperationException("历史服务尚未初始化。");
+        return new DiagnosticRunner(
+            profile,
+            settings,
+            repository,
+            () => _keyboardHook?.IsInstalled == true);
+    }
+
+    /// <summary>打开设置窗口的「服务商档案」页并立刻测一遍当前档案。</summary>
+    private void ShowProfileTest()
+    {
+        ShowSettingsWindow(focusExtraRequestBody: false);
+        _settingsWindow?.ShowProfileTest();
+    }
+
+    /// <summary>
+    /// 某个档案因持久故障（Key 失效 / 余额不足 / 模型不存在）被自动标记失效。
+    /// 必须落盘 + 提醒，否则用户会一直不知道自己的主服务商已经废了。
+    /// </summary>
+    private void OnProfileMarkedFailed(ApiProfile profile, string reason)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(new Action(() => OnProfileMarkedFailed(profile, reason)));
+            return;
+        }
+
         try
         {
-            if (diagnosticSettings is null || _historyRepository is null)
+            if (_settings is not null
+                && _settingsStore is not null
+                && !_settingsStore.TrySave(_settings, out string? errorMessage))
             {
-                throw new InvalidOperationException("诊断服务尚未初始化。");
+                Logger.Warning("设置", errorMessage ?? "保存档案失效标记失败。");
             }
 
-            if (_diagnosticWindow is null)
-            {
-                DiagnosticRunner runner = new(
-                    diagnosticSettings,
-                    _historyRepository,
-                    () => _keyboardHook?.IsInstalled == true);
-                _diagnosticWindow = new DiagnosticWindow(runner)
-                {
-                    Owner = Windows.Cast<Window>().FirstOrDefault(window =>
-                        window.IsActive && window is not DiagnosticWindow)
-                };
-                _diagnosticWindow.Closed += DiagnosticWindow_OnClosed;
-            }
-
-            if (_diagnosticWindow.WindowState == WindowState.Minimized)
-            {
-                _diagnosticWindow.WindowState = WindowState.Normal;
-            }
-
-            _diagnosticWindow.Show();
-            _diagnosticWindow.Activate();
+            _trayIcon?.RefreshFromSettings();
+            _trayIcon?.ShowInformation(
+                "CtrlTranslator",
+                $"「{profile.Name}」{reason}，已自动改用备用服务商。到设置里修好后会自动恢复。");
         }
         catch (Exception exception)
         {
-            Logger.Error("一键诊断", "打开诊断窗口失败。", exception);
-            System.Windows.MessageBox.Show("诊断窗口没有打开成功，详情已写入日志。", "CtrlTranslator",
-                MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private void DiagnosticWindow_OnClosed(object? sender, EventArgs e)
-    {
-        if (sender is DiagnosticWindow window)
-        {
-            window.Closed -= DiagnosticWindow_OnClosed;
-            if (ReferenceEquals(_diagnosticWindow, window))
-            {
-                _diagnosticWindow = null;
-            }
+            Logger.Error("翻译", "处理档案失效标记失败。", exception);
         }
     }
 
@@ -884,7 +890,7 @@ public partial class App : System.Windows.Application
                     _settings,
                     _settingsStore,
                     () => OnSettingsChanged(SettingsChangeKind.General),
-                    ShowDiagnosticWindow);
+                    CreateDiagnosticRunner);
                 _onboardingWindow.Closed += OnboardingWindow_OnClosed;
             }
 
@@ -916,6 +922,119 @@ public partial class App : System.Windows.Application
         ShowSettingsWindow(focusExtraRequestBody: false);
     }
 
+    private async void TrayIcon_OnUpdateCheckRequested(object? sender, EventArgs e)
+    {
+        if (_updateService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _trayIcon?.ShowInformation("CtrlTranslator", "正在检查更新…");
+            ReleaseInfo? release = await _updateService.CheckManuallyAsync(CancellationToken.None);
+            if (release is null)
+            {
+                _trayIcon?.ShowInformation(
+                    "CtrlTranslator",
+                    $"已经是最新版本 {UpdateChecker.CurrentVersion.ToString(3)}。");
+                return;
+            }
+
+            ShowUpdateWindow(release);
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("自动更新", "手动检查更新失败。", exception);
+            _trayIcon?.ShowError("检查更新没有完成，可能是连不上 GitHub。详情见日志。");
+        }
+    }
+
+    /// <summary>
+    /// 弹出更新窗口。同一时刻只允许存在一个，重复触发时把已有的那个激活到前面。
+    /// </summary>
+    internal void ShowUpdateWindow(ReleaseInfo release)
+    {
+        try
+        {
+            if (_updateWindow is not null)
+            {
+                _updateWindow.Activate();
+                return;
+            }
+
+            _updateWindow = new UpdateWindow(
+                release,
+                InstallationInfo.Detect(),
+                ReleaseSingleInstanceMutex,
+                () => DismissUpdate(release));
+            _updateWindow.Closed += UpdateWindow_OnClosed;
+            _updateWindow.Show();
+            _updateWindow.Activate();
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("自动更新", "打开更新窗口失败。", exception);
+            _trayIcon?.ShowError("更新提示窗口没有打开成功，详情已记录到日志。");
+        }
+    }
+
+    private void UpdateWindow_OnClosed(object? sender, EventArgs e)
+    {
+        if (sender is UpdateWindow window)
+        {
+            window.Closed -= UpdateWindow_OnClosed;
+            if (ReferenceEquals(_updateWindow, window))
+            {
+                _updateWindow = null;
+            }
+        }
+    }
+
+    private void DismissUpdate(ReleaseInfo release)
+    {
+        if (_settings is null || _settingsStore is null)
+        {
+            return;
+        }
+
+        _settings.DismissedUpdateVersion = release.Version.ToString();
+        if (!_settingsStore.TrySave(_settings, out string? errorMessage))
+        {
+            Logger.Warning("自动更新", errorMessage ?? "记录已跳过版本失败。");
+            return;
+        }
+
+        Logger.Info("自动更新", $"用户选择稍后更新 {release.Tag}，本版本不再自动弹窗。");
+    }
+
+    /// <summary>
+    /// 在启动安装程序之前放开单实例互斥体。
+    /// </summary>
+    /// <remarks>
+    /// 安装脚本的 InitializeSetup 会等这个互斥体消失才继续（最多 10 秒）。
+    /// 本进程紧接着就 Shutdown，OnExit 里不会重复释放 —— <see cref="_ownsMutex"/> 已被置回 false。
+    /// </remarks>
+    private void ReleaseSingleInstanceMutex()
+    {
+        try
+        {
+            if (_ownsMutex)
+            {
+                _instanceMutex?.ReleaseMutex();
+                _ownsMutex = false;
+            }
+
+            _instanceMutex?.Dispose();
+            _instanceMutex = null;
+            Logger.Info("自动更新", "已释放单实例互斥体，安装程序可以继续。");
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("自动更新", "释放单实例互斥体失败，安装程序可能会等待超时。", exception);
+        }
+    }
+
     private void ShowSettingsWindow(bool focusExtraRequestBody)
     {
         try
@@ -938,7 +1057,9 @@ public partial class App : System.Windows.Application
                     _settingsStore,
                     _historyRepository,
                     OnSettingsChanged,
-                    ShowDiagnosticWindow);
+                    CreateDiagnosticRunner,
+                    _updateService,
+                    ShowUpdateWindow);
                 _settingsWindow.Closed += SettingsWindow_OnClosed;
             }
 
@@ -976,7 +1097,6 @@ public partial class App : System.Windows.Application
 
     private void OnSettingsChanged(SettingsChangeKind changeKind)
     {
-        ApplyThemeResources();
         _appState?.RefreshBlacklist();
         _trayIcon?.RefreshFromSettings();
         if (changeKind == SettingsChangeKind.KeyboardHook)
@@ -1055,89 +1175,7 @@ public partial class App : System.Windows.Application
 
     private bool IsThinkingDisabled()
     {
-        return ExtraRequestBodyHelper.IsThinkingDisabled(_settings?.ExtraRequestBody);
-    }
-
-    /// <summary>
-    /// 系统主题变化由应用统一处理，替换令牌字典后所有 DynamicResource 会立即刷新。
-    /// </summary>
-    private void SystemEvents_OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
-    {
-        if (e.Category is not (UserPreferenceCategory.General or UserPreferenceCategory.Color))
-        {
-            return;
-        }
-
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            try
-            {
-                ApplyThemeResources();
-            }
-            catch (Exception exception)
-            {
-                Logger.Error("主题", "Windows 主题变化后更新界面失败。", exception);
-            }
-        }));
-    }
-
-    private void ApplyThemeResources()
-    {
-        bool useDarkTheme = ShouldUseDarkTheme(_settings?.Theme);
-        string themeName = useDarkTheme ? "Dark" : "Light";
-        ResourceDictionary dictionaries = Resources;
-        ResourceDictionary? currentTokens = dictionaries.MergedDictionaries.FirstOrDefault(
-            dictionary => dictionary.Source?.OriginalString.Contains("Themes/Tokens.", StringComparison.OrdinalIgnoreCase) == true);
-        string desiredSource = $"Themes/Tokens.{themeName}.xaml";
-        if (currentTokens?.Source?.OriginalString.EndsWith(
-                $"Tokens.{themeName}.xaml",
-                StringComparison.OrdinalIgnoreCase) == true)
-        {
-            return;
-        }
-
-        var replacement = new ResourceDictionary
-        {
-            Source = new Uri(desiredSource, UriKind.Relative)
-        };
-        if (currentTokens is null)
-        {
-            dictionaries.MergedDictionaries.Insert(0, replacement);
-        }
-        else
-        {
-            int index = dictionaries.MergedDictionaries.IndexOf(currentTokens);
-            dictionaries.MergedDictionaries[index] = replacement;
-        }
-
-        Logger.Info("主题", $"界面主题已切换为{(useDarkTheme ? "深色" : "浅色")}。" );
-    }
-
-    private static bool ShouldUseDarkTheme(string? configuredTheme)
-    {
-        if (string.Equals(configuredTheme, "Dark", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(configuredTheme, "深色", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        if (string.Equals(configuredTheme, "Light", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(configuredTheme, "浅色", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        try
-        {
-            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(
-                @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-            return key?.GetValue("AppsUseLightTheme") is int value && value == 0;
-        }
-        catch (Exception exception)
-        {
-            Logger.Error("主题", "读取 Windows 主题失败，使用浅色主题。", exception);
-            return false;
-        }
+        return ExtraRequestBodyHelper.IsThinkingDisabled(_settings?.CurrentProfile.ExtraRequestBody);
     }
 
     private static void TryLogStartupFailure(Exception exception)

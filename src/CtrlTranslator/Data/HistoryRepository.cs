@@ -27,7 +27,8 @@ public sealed class HistoryRepository
         {
             query.CommandText = """
                 SELECT id, cache_key, source_text, result_text, target_lang, mode_id,
-                       model, is_word, starred, app_name, latency_ms, created_at
+                       model, is_word, starred, app_name, latency_ms, created_at,
+                       profile_name, prompt_tokens, completion_tokens
                   FROM translations
                  WHERE cache_key = $cache_key
                  ORDER BY created_at DESC
@@ -67,10 +68,12 @@ public sealed class HistoryRepository
         command.CommandText = """
             INSERT INTO translations (
                 cache_key, source_text, result_text, target_lang, mode_id, model,
-                is_word, starred, app_name, latency_ms, created_at)
+                is_word, starred, app_name, latency_ms, created_at,
+                profile_name, prompt_tokens, completion_tokens)
             VALUES (
                 $cache_key, $source_text, $result_text, $target_lang, $mode_id, $model,
-                $is_word, $starred, $app_name, $latency_ms, $created_at);
+                $is_word, $starred, $app_name, $latency_ms, $created_at,
+                $profile_name, $prompt_tokens, $completion_tokens);
             SELECT last_insert_rowid();
             """;
         AddRecordParameters(command, record);
@@ -103,7 +106,8 @@ public sealed class HistoryRepository
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
             SELECT id, cache_key, source_text, result_text, target_lang, mode_id,
-                   model, is_word, starred, app_name, latency_ms, created_at
+                   model, is_word, starred, app_name, latency_ms, created_at,
+                   profile_name, prompt_tokens, completion_tokens
               FROM translations
              WHERE ($starred_only = 0 OR starred = 1)
                AND ($keyword = '' OR source_text LIKE $pattern ESCAPE '\' OR result_text LIKE $pattern ESCAPE '\')
@@ -133,7 +137,8 @@ public sealed class HistoryRepository
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
             SELECT id, cache_key, source_text, result_text, target_lang, mode_id,
-                   model, is_word, starred, app_name, latency_ms, created_at
+                   model, is_word, starred, app_name, latency_ms, created_at,
+                   profile_name, prompt_tokens, completion_tokens
               FROM translations
              ORDER BY created_at DESC;
             """;
@@ -263,6 +268,9 @@ public sealed class HistoryRepository
         command.Parameters.AddWithValue(
             "$created_at",
             record.CreatedAt.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$profile_name", (object?)record.ProfileName ?? DBNull.Value);
+        command.Parameters.AddWithValue("$prompt_tokens", (object?)record.PromptTokens ?? DBNull.Value);
+        command.Parameters.AddWithValue("$completion_tokens", (object?)record.CompletionTokens ?? DBNull.Value);
     }
 
     private static TranslationRecord ReadRecord(SqliteDataReader reader)
@@ -283,7 +291,10 @@ public sealed class HistoryRepository
             CreatedAt = DateTime.Parse(
                 reader.GetString(11),
                 CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind)
+                DateTimeStyles.RoundtripKind),
+            ProfileName = reader.IsDBNull(12) ? null : reader.GetString(12),
+            PromptTokens = reader.IsDBNull(13) ? null : reader.GetInt64(13),
+            CompletionTokens = reader.IsDBNull(14) ? null : reader.GetInt64(14)
         };
     }
 }

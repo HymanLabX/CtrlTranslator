@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -6,18 +7,15 @@ using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
 using System.Windows.Threading;
 using CtrlTranslator.Data;
 using CtrlTranslator.Diagnostics;
 using CtrlTranslator.Settings;
 using CtrlTranslator.Translation;
+using CtrlTranslator.Update;
 using Button = System.Windows.Controls.Button;
 using ComboBox = System.Windows.Controls.ComboBox;
 using ComboBoxItem = System.Windows.Controls.ComboBoxItem;
-using FontFamily = System.Windows.Media.FontFamily;
-using HorizontalAlignment = System.Windows.HorizontalAlignment;
-using Orientation = System.Windows.Controls.Orientation;
 using TextBox = System.Windows.Controls.TextBox;
 
 namespace CtrlTranslator.UI;
@@ -29,29 +27,27 @@ public enum SettingsChangeKind
 }
 
 /// <summary>
-/// 五页设置窗口。字段离开编辑状态后立即保存，开关和下拉选择则点击后立即保存。
+/// 左侧导航 + 右侧卡片的设置窗口。字段离开编辑状态后立即保存，开关和下拉选择则点击后立即保存。
+/// 连接信息与模型参数写入<b>列表里选中的那个档案</b>，不一定是当前正在用的档案。
 /// </summary>
 public partial class SettingsWindow : Window
 {
-    private static readonly ProviderPreset[] ProviderPresets =
-    [
-        new("自定义", string.Empty, string.Empty),
-        new("DeepSeek", "https://api.deepseek.com/v1", "deepseek-v4-flash"),
-        new("智谱 GLM", "https://open.bigmodel.cn/api/paas/v4", "glm-4-flash"),
-        new("阿里通义", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-turbo"),
-        new("月之暗面 Kimi", "https://api.moonshot.cn/v1", "moonshot-v1-8k"),
-        new("硅基流动", "https://api.siliconflow.cn/v1", "Qwen/Qwen2.5-7B-Instruct"),
-        new("OpenRouter", "https://openrouter.ai/api/v1", string.Empty),
-        new("本地 Ollama", "http://localhost:11434/v1", "qwen2.5:7b")
-    ];
+    private const int ProfilesSectionIndex = 0;
+    private const int ModelParamsSectionIndex = 1;
 
     private readonly AppSettings _settings;
     private readonly SettingsStore _settingsStore;
     private readonly HistoryRepository _historyRepository;
     private readonly Action<SettingsChangeKind> _settingsChanged;
-    private readonly Action _diagnosticsRequested;
+    private readonly Func<ApiProfile, DiagnosticRunner> _diagnosticRunnerFactory;
+    private readonly UpdateService? _updateService;
+    private readonly Action<ReleaseInfo> _showUpdateWindow;
     private readonly DispatcherTimer _triggerSaveTimer;
+    private readonly ObservableCollection<DiagnosticResult> _testResults = [];
+    private readonly ScrollViewer[] _sections;
     private CancellationTokenSource? _modelFetchCancellation;
+    private CancellationTokenSource? _testCancellation;
+    private DiagnosticRunner? _lastTestRunner;
     private bool _loading = true;
     private bool _apiKeyVisible;
     private int _testTapCount;
@@ -61,35 +57,62 @@ public partial class SettingsWindow : Window
         SettingsStore settingsStore,
         HistoryRepository historyRepository,
         Action<SettingsChangeKind> settingsChanged,
-        Action diagnosticsRequested)
+        Func<ApiProfile, DiagnosticRunner> diagnosticRunnerFactory,
+        UpdateService? updateService,
+        Action<ReleaseInfo> showUpdateWindow)
     {
         InitializeComponent();
         _settings = settings;
         _settingsStore = settingsStore;
         _historyRepository = historyRepository;
         _settingsChanged = settingsChanged;
-        _diagnosticsRequested = diagnosticsRequested;
+        _diagnosticRunnerFactory = diagnosticRunnerFactory;
+        _updateService = updateService;
+        _showUpdateWindow = showUpdateWindow;
         _triggerSaveTimer = new DispatcherTimer(
             TimeSpan.FromMilliseconds(250),
             DispatcherPriority.Background,
             TriggerSaveTimer_OnTick,
             Dispatcher);
 
+        _sections =
+        [
+            ProfilesSection,
+            ModelParamsSection,
+            BehaviorSection,
+            TriggerSection,
+            PrivacySection,
+            SystemSection
+        ];
+        TestResultsList.ItemsSource = _testResults;
+
         LoadControlsFromSettings();
         RefreshProcessList();
+        SectionNav.SelectedIndex = ProfilesSectionIndex;
         _loading = false;
         UpdateExtraRequestBodyValidation();
         UpdateModeButtons();
     }
 
+    /// <summary>打开「服务商档案」页；需要时把焦点直接落到额外请求参数上。</summary>
     internal void ShowTranslationService(bool focusExtraRequestBody)
     {
-        SettingsTabs.SelectedIndex = 0;
         if (focusExtraRequestBody)
         {
+            SectionNav.SelectedIndex = ModelParamsSectionIndex;
             ExtraRequestBodyBox.Focus();
             ExtraRequestBodyBox.SelectAll();
+            return;
         }
+
+        SectionNav.SelectedIndex = ProfilesSectionIndex;
+    }
+
+    /// <summary>打开「服务商档案」页并立刻跑一遍测试。浮窗上那些"查不出原因"的错误走这条路。</summary>
+    internal void ShowProfileTest()
+    {
+        SectionNav.SelectedIndex = ProfilesSectionIndex;
+        _ = RunProfileTestAsync();
     }
 
     internal void RecordValidTap()
@@ -120,21 +143,23 @@ public partial class SettingsWindow : Window
             "Brush.Success");
     }
 
+    private ApiProfile? SelectedProfile => (ProfilesList.SelectedItem as ProfileListItem)?.Profile;
+
+    private void SectionNav_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        int index = SectionNav.SelectedIndex;
+        for (int position = 0; position < _sections.Length; position++)
+        {
+            _sections[position].Visibility = position == index
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+    }
+
     private void LoadControlsFromSettings()
     {
-        ProviderPresetCombo.ItemsSource = ProviderPresets.Select(preset => preset.Name);
-        ProviderPresetCombo.SelectedItem = ProviderPresets.Any(preset => preset.Name == _settings.ProviderPreset)
-            ? _settings.ProviderPreset
-            : "自定义";
-        BaseUrlBox.Text = _settings.BaseUrl;
-        ApiKeyPasswordBox.Password = _settings.ApiKey;
-        ApiKeyVisibleBox.Text = _settings.ApiKey;
-        ModelCombo.Text = _settings.Model;
-        TemperatureBox.Text = _settings.Temperature.ToString("0.##", CultureInfo.CurrentCulture);
-        MaxTokensBox.Text = _settings.MaxTokens.ToString(CultureInfo.CurrentCulture);
-        RequestTimeoutBox.Text = _settings.RequestTimeoutSeconds.ToString(CultureInfo.CurrentCulture);
-        FirstTokenTimeoutBox.Text = _settings.FirstTokenTimeoutSeconds.ToString(CultureInfo.CurrentCulture);
-        ExtraRequestBodyBox.Text = _settings.ExtraRequestBody;
+        ProviderPresetCombo.ItemsSource = ProviderPresets.All.Select(preset => preset.Name).ToArray();
+        RefreshProfiles(_settings.CurrentProfileId);
 
         RefreshModes(_settings.CurrentModeId);
         TargetLanguageBox.Text = _settings.TargetLanguage;
@@ -154,11 +179,53 @@ public partial class SettingsWindow : Window
         DetailedLoggingCheckBox.IsChecked = _settings.DetailedLogging;
 
         StartWithWindowsCheckBox.IsChecked = _settings.StartWithWindows;
-        SelectComboItemByTag(ThemeCombo, _settings.Theme);
         PopupFontSizeBox.Text = _settings.PopupFontSize.ToString("0.##", CultureInfo.CurrentCulture);
         PopupMaxWidthBox.Text = _settings.PopupMaxWidth.ToString("0.##", CultureInfo.CurrentCulture);
         PopupMaxHeightBox.Text = _settings.PopupMaxHeight.ToString("0.##", CultureInfo.CurrentCulture);
         StreamFallbackDelayBox.Text = _settings.StreamFallbackDelayMs.ToString(CultureInfo.CurrentCulture);
+
+        AboutVersionText.Text = $"CtrlTranslator v{UpdateChecker.CurrentVersion.ToString(3)}";
+        AutoCheckUpdatesCheckBox.IsChecked = _settings.AutoCheckUpdates;
+        UpdateStatusText.Text = _updateService?.PendingRelease is { } pending
+            ? $"发现新版本 {pending.Version.ToString(3)}，点「检查更新」可以立即安装。"
+            : $"当前版本 {UpdateChecker.CurrentVersion.ToString(3)}。更新包会先校验 SHA256 再安装，校验不通过一律丢弃。";
+    }
+
+    private async void CheckUpdateButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_updateService is null)
+        {
+            return;
+        }
+
+        CheckUpdateButton.IsEnabled = false;
+        CheckUpdateButton.Content = "检查中…";
+        UpdateStatusText.Text = "正在向 GitHub 查询最新版本…";
+
+        try
+        {
+            ReleaseInfo? release = await _updateService.CheckManuallyAsync(CancellationToken.None);
+            if (release is null)
+            {
+                UpdateStatusText.Text =
+                    $"已经是最新版本 {UpdateChecker.CurrentVersion.ToString(3)}。"
+                    + "（如果你在国内且没开代理，也可能是连不上 GitHub —— 详情见日志。）";
+                return;
+            }
+
+            UpdateStatusText.Text = $"发现新版本 {release.Version.ToString(3)}。";
+            _showUpdateWindow(release);
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("自动更新", "从设置页检查更新失败。", exception);
+            UpdateStatusText.Text = "检查更新没有完成，详情已记录到日志。";
+        }
+        finally
+        {
+            CheckUpdateButton.IsEnabled = true;
+            CheckUpdateButton.Content = "检查更新";
+        }
     }
 
     private bool SaveAll(SettingsChangeKind changeKind = SettingsChangeKind.General)
@@ -193,15 +260,41 @@ public partial class SettingsWindow : Window
                 return false;
             }
 
-            _settings.ProviderPreset = ProviderPresetCombo.SelectedItem as string ?? "自定义";
-            _settings.BaseUrl = BaseUrlBox.Text.Trim();
-            _settings.ApiKey = CurrentApiKey().Trim();
-            _settings.Model = ModelCombo.Text.Trim();
-            _settings.Temperature = temperature;
-            _settings.MaxTokens = maxTokens;
-            _settings.RequestTimeoutSeconds = requestTimeout;
-            _settings.FirstTokenTimeoutSeconds = firstTokenTimeout;
-            _settings.ExtraRequestBody = ExtraRequestBodyBox.Text.Trim();
+            bool profileNameChanged = false;
+            if (SelectedProfile is { } profile)
+            {
+                string previousBaseUrl = profile.BaseUrl;
+                string previousApiKey = profile.ApiKey;
+                string previousModel = profile.Model;
+
+                profile.ProviderPreset = ProviderPresetCombo.SelectedItem as string ?? ProviderPresets.CustomName;
+                profile.BaseUrl = BaseUrlBox.Text.Trim();
+                profile.ApiKey = CurrentApiKey().Trim();
+                profile.Model = ModelCombo.Text.Trim();
+                profile.Temperature = temperature;
+                profile.MaxTokens = maxTokens;
+                profile.RequestTimeoutSeconds = requestTimeout;
+                profile.FirstTokenTimeoutSeconds = firstTokenTimeout;
+                profile.ExtraRequestBody = ExtraRequestBodyBox.Text.Trim();
+
+                // 用户动手改过连接信息就说明他在修，标记该退场了 —— 否则会出现
+                // "我明明换了新 Key，它怎么还在用备用"这种最气人的状态。
+                bool connectionEdited = !string.Equals(previousBaseUrl, profile.BaseUrl, StringComparison.Ordinal)
+                    || !string.Equals(previousApiKey, profile.ApiKey, StringComparison.Ordinal)
+                    || !string.Equals(previousModel, profile.Model, StringComparison.Ordinal);
+                if (connectionEdited && profile.IsFailed)
+                {
+                    profile.ClearFailure();
+                    Logger.Info("设置", $"档案「{profile.Name}」的连接信息已修改，失效标记自动解除。");
+                    profileNameChanged = true;
+                }
+
+                if (connectionEdited)
+                {
+                    profileNameChanged = true;
+                }
+            }
+
             _settings.TargetLanguage = TargetLanguageBox.Text.Trim();
             _settings.FallbackLanguage = FallbackLanguageBox.Text.Trim();
             _settings.WordThreshold = wordThreshold;
@@ -214,11 +307,11 @@ public partial class SettingsWindow : Window
             _settings.PrivacyMode = PrivacyModeCheckBox.IsChecked == true;
             _settings.DetailedLogging = DetailedLoggingCheckBox.IsChecked == true;
             _settings.StartWithWindows = StartWithWindowsCheckBox.IsChecked == true;
-            _settings.Theme = SelectedComboTag(ThemeCombo, "System");
             _settings.PopupFontSize = popupFontSize;
             _settings.PopupMaxWidth = popupMaxWidth;
             _settings.PopupMaxHeight = popupMaxHeight;
             _settings.StreamFallbackDelayMs = streamDelay;
+            _settings.AutoCheckUpdates = AutoCheckUpdatesCheckBox.IsChecked == true;
 
             if (!_settingsStore.TrySave(_settings, out string? errorMessage))
             {
@@ -226,12 +319,17 @@ public partial class SettingsWindow : Window
                 return false;
             }
 
-            Logger.SetApiKey(_settings.ApiKey);
+            Logger.SetApiKeys(_settings.Profiles.Select(item => item.ApiKey));
             Logger.Info("设置", "设置窗口中的修改已保存并立即生效。");
             StatusText.SetResourceReference(
                 System.Windows.Controls.TextBlock.ForegroundProperty,
                 "Brush.Success");
             StatusText.Text = "已保存，设置已立即生效。";
+            if (profileNameChanged)
+            {
+                RefreshProfiles();
+            }
+
             _settingsChanged(changeKind);
             return true;
         }
@@ -243,16 +341,359 @@ public partial class SettingsWindow : Window
         }
     }
 
+    // ==================== 服务商档案 ====================
+
+    private void RefreshProfiles(string? selectProfileId = null)
+    {
+        string? desired = selectProfileId ?? SelectedProfile?.Id ?? _settings.CurrentProfileId;
+        List<ProfileListItem> items = _settings.Profiles
+            .Select(profile => new ProfileListItem(
+                profile,
+                string.Equals(profile.Id, _settings.CurrentProfileId, StringComparison.Ordinal)))
+            .ToList();
+
+        bool previousLoading = _loading;
+        _loading = true;
+        try
+        {
+            ProfilesList.ItemsSource = null;
+            ProfilesList.ItemsSource = items;
+            ProfilesList.SelectedItem = items.FirstOrDefault(item =>
+                    string.Equals(item.Profile.Id, desired, StringComparison.Ordinal))
+                ?? items.FirstOrDefault();
+            LoadProfileDetails();
+        }
+        finally
+        {
+            _loading = previousLoading;
+        }
+
+        UpdateProfileButtons();
+    }
+
+    private void LoadProfileDetails()
+    {
+        ApiProfile? profile = SelectedProfile;
+        if (profile is null)
+        {
+            ProfileNameBox.Text = string.Empty;
+            BaseUrlBox.Text = string.Empty;
+            ApiKeyPasswordBox.Password = string.Empty;
+            ApiKeyVisibleBox.Text = string.Empty;
+            ModelCombo.Text = string.Empty;
+            ProfileFailureCard.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        ProfileNameBox.Text = profile.Name;
+        ProviderPresetCombo.SelectedItem = ProviderPresets.IsKnown(profile.ProviderPreset)
+            ? profile.ProviderPreset
+            : ProviderPresets.CustomName;
+        BaseUrlBox.Text = profile.BaseUrl;
+        ApiKeyPasswordBox.Password = profile.ApiKey;
+        ApiKeyVisibleBox.Text = profile.ApiKey;
+        ModelCombo.ItemsSource = null;
+        ModelCombo.Text = profile.Model;
+        TemperatureBox.Text = profile.Temperature.ToString("0.##", CultureInfo.CurrentCulture);
+        MaxTokensBox.Text = profile.MaxTokens.ToString(CultureInfo.CurrentCulture);
+        RequestTimeoutBox.Text = profile.RequestTimeoutSeconds.ToString(CultureInfo.CurrentCulture);
+        FirstTokenTimeoutBox.Text = profile.FirstTokenTimeoutSeconds.ToString(CultureInfo.CurrentCulture);
+        ExtraRequestBodyBox.Text = profile.ExtraRequestBody;
+        ModelParamsCaption.Text =
+            $"下面这些参数只作用于档案「{profile.Name}」。要改别的档案，先去「服务商档案」里选中它。";
+
+        UpdateBaseUrlEditability();
+        UpdateFailureCard(profile);
+        _testResults.Clear();
+        _lastTestRunner = null;
+        CopyReportButton.IsEnabled = false;
+        TestStatusText.Text = "逐项检查配置、网络、鉴权、模型、翻译链路、语音、数据库、快捷键和权限，一眼看出卡在哪一环。";
+    }
+
+    private void UpdateFailureCard(ApiProfile profile)
+    {
+        if (!profile.IsFailed)
+        {
+            ProfileFailureCard.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        string when = profile.FailedAt?.ToString("yyyy-MM-dd HH:mm", CultureInfo.CurrentCulture) ?? "刚刚";
+        ProfileFailureText.Text =
+            $"这个档案已被标记失效（{when}）：{profile.FailureReason}。划词时会自动跳过它。"
+            + "改一下上面的 Base URL / API Key / 模型名就会自动解除标记。";
+        ProfileFailureCard.Visibility = Visibility.Visible;
+    }
+
+    private void UpdateProfileButtons()
+    {
+        int index = ProfilesList.SelectedIndex;
+        bool selected = SelectedProfile is not null;
+        MoveProfileUpButton.IsEnabled = selected && index > 0;
+        MoveProfileDownButton.IsEnabled = selected && index >= 0 && index < _settings.Profiles.Count - 1;
+        DeleteProfileButton.IsEnabled = selected && _settings.Profiles.Count > 1;
+        SetCurrentProfileButton.IsEnabled = selected
+            && !string.Equals(SelectedProfile!.Id, _settings.CurrentProfileId, StringComparison.Ordinal);
+        TestProfileButton.IsEnabled = selected && _testCancellation is null;
+    }
+
+    private void ProfilesList_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        bool previousLoading = _loading;
+        _loading = true;
+        try
+        {
+            LoadProfileDetails();
+        }
+        finally
+        {
+            _loading = previousLoading;
+        }
+
+        UpdateProfileButtons();
+    }
+
+    private void AddProfileButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        ExecuteUiAction("新建服务商档案", () =>
+        {
+            ApiProfile profile = ApiProfile.CreateFromPreset(
+                ProviderPresets.CustomName,
+                _settings.GenerateUniqueProfileName("新建服务商"));
+            _settings.Profiles.Add(profile);
+            RefreshProfiles(profile.Id);
+            SaveAll();
+            ProfileNameBox.Focus();
+            ProfileNameBox.SelectAll();
+        });
+    }
+
+    private void DeleteProfileButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        ExecuteUiAction("删除服务商档案", () =>
+        {
+            if (SelectedProfile is not { } profile)
+            {
+                ShowValidationError("请先选择要删除的档案。");
+                return;
+            }
+
+            if (_settings.Profiles.Count <= 1)
+            {
+                System.Windows.MessageBox.Show(
+                    this,
+                    "至少要保留一个服务商档案。想换服务商的话，直接改这个档案的内容就行。",
+                    "删除服务商档案",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            if (System.Windows.MessageBox.Show(
+                    this,
+                    $"确定删除档案「{profile.Name}」吗？它的 API Key 会一并删除。",
+                    "删除服务商档案",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question) != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            _settings.Profiles.Remove(profile);
+            if (string.Equals(_settings.CurrentProfileId, profile.Id, StringComparison.Ordinal))
+            {
+                _settings.CurrentProfileId = _settings.Profiles[0].Id;
+            }
+
+            RefreshProfiles(_settings.CurrentProfileId);
+            SaveAll();
+        });
+    }
+
+    private void MoveProfileUpButton_OnClick(object sender, RoutedEventArgs e) => MoveSelectedProfile(-1);
+
+    private void MoveProfileDownButton_OnClick(object sender, RoutedEventArgs e) => MoveSelectedProfile(1);
+
+    private void MoveSelectedProfile(int offset)
+    {
+        ExecuteUiAction("调整档案顺序", () =>
+        {
+            if (SelectedProfile is not { } profile)
+            {
+                return;
+            }
+
+            int index = _settings.Profiles.IndexOf(profile);
+            int target = index + offset;
+            if (index < 0 || target < 0 || target >= _settings.Profiles.Count)
+            {
+                return;
+            }
+
+            _settings.Profiles.RemoveAt(index);
+            _settings.Profiles.Insert(target, profile);
+            RefreshProfiles(profile.Id);
+            SaveAll();
+            StatusText.Text = "顺序已保存。列表顺序就是降级顺序。";
+        });
+    }
+
+    private void SetCurrentProfileButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        ExecuteUiAction("切换当前服务商", () =>
+        {
+            if (SelectedProfile is not { } profile)
+            {
+                return;
+            }
+
+            _settings.CurrentProfileId = profile.Id;
+            RefreshProfiles(profile.Id);
+            SaveAll();
+            StatusText.Text = $"当前翻译服务已切换为「{profile.Name}」。";
+        });
+    }
+
+    private void ClearFailureButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        ExecuteUiAction("解除失效标记", () =>
+        {
+            if (SelectedProfile is not { } profile)
+            {
+                return;
+            }
+
+            profile.ClearFailure();
+            RefreshProfiles(profile.Id);
+            SaveAll();
+            StatusText.Text = $"档案「{profile.Name}」的失效标记已解除，下次划词会重新尝试它。";
+        });
+    }
+
+    private void ProfileNameBox_OnLostKeyboardFocus(object sender, System.Windows.Input.KeyboardFocusChangedEventArgs e)
+    {
+        if (_loading || SelectedProfile is not { } profile)
+        {
+            return;
+        }
+
+        string name = ProfileNameBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            ShowValidationError("档案名称不能为空。");
+            ProfileNameBox.Text = profile.Name;
+            return;
+        }
+
+        profile.Name = name;
+        RefreshProfiles(profile.Id);
+        SaveAll();
+    }
+
+    private async void TestProfileButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        await RunProfileTestAsync();
+    }
+
+    private async Task RunProfileTestAsync()
+    {
+        if (SelectedProfile is not { } profile || _testCancellation is not null)
+        {
+            return;
+        }
+
+        _testResults.Clear();
+        CopyReportButton.IsEnabled = false;
+        _testCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        TestProfileButton.IsEnabled = false;
+        TestProfileButton.Content = "测试中…";
+        TestStatusText.Text = $"正在测试档案「{profile.Name}」…";
+
+        try
+        {
+            DiagnosticRunner runner = _diagnosticRunnerFactory(profile);
+            _lastTestRunner = runner;
+            var progress = new Progress<DiagnosticResult>(_testResults.Add);
+            IReadOnlyList<DiagnosticResult> results = await runner.RunAsync(progress, _testCancellation.Token);
+
+            int failed = results.Count(result => result.Status == DiagnosticStatus.Failed);
+            int warnings = results.Count(result => result.Status == DiagnosticStatus.Warning);
+            TestStatusText.Text = failed > 0
+                ? $"有 {failed} 项没通过。看上面标 ✗ 的那一行就知道卡在哪。"
+                : warnings > 0
+                    ? $"全部通过，但有 {warnings} 项提醒，可以看一下。"
+                    : "全部通过，这个档案可以正常翻译。";
+            CopyReportButton.IsEnabled = results.Count > 0;
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.Info("服务商测试", "测试已取消或超时。");
+            TestStatusText.Text = "测试被中断或超时了，可以再点一次「测试」。";
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("服务商测试", "测试执行失败。", exception);
+            TestStatusText.Text = "测试没有跑完，详情已记录到日志。";
+        }
+        finally
+        {
+            _testCancellation?.Dispose();
+            _testCancellation = null;
+            TestProfileButton.Content = "测试";
+            UpdateProfileButtons();
+        }
+    }
+
+    private void CopyReportButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        ExecuteUiAction("复制诊断报告", () =>
+        {
+            if (_lastTestRunner is null || _testResults.Count == 0)
+            {
+                return;
+            }
+
+            System.Windows.Clipboard.SetText(_lastTestRunner.BuildReport(_testResults));
+            StatusText.Text = "诊断报告已复制（API Key 已脱敏）。";
+        });
+    }
+
+    // ==================== 翻译模式 ====================
+
     private void RefreshModes(string? selectedModeId = null)
     {
         string desiredMode = selectedModeId ?? _settings.CurrentModeId;
-        CurrentModeCombo.ItemsSource = null;
         ModesList.ItemsSource = null;
-        CurrentModeCombo.ItemsSource = _settings.Modes;
         ModesList.ItemsSource = _settings.Modes;
-        CurrentModeCombo.SelectedValue = desiredMode;
         ModesList.SelectedItem = _settings.Modes.FirstOrDefault(mode => mode.Id == desiredMode)
             ?? _settings.Modes.FirstOrDefault();
+
+        TranslationMode? current = _settings.Modes.FirstOrDefault(mode => mode.Id == _settings.CurrentModeId);
+        CurrentModeStatusText.Text = current is null
+            ? "当前使用：（未选择）"
+            : $"当前使用：{current.Name}";
+
+        LoadModeDetails();
+        UpdateModeButtons();
+    }
+
+    private void LoadModeDetails()
+    {
+        if (ModesList.SelectedItem is TranslationMode mode)
+        {
+            ModeNameBox.Text = mode.Name;
+            ModePromptBox.Text = mode.SystemPromptTemplate;
+        }
+        else
+        {
+            ModeNameBox.Text = string.Empty;
+            ModePromptBox.Text = string.Empty;
+        }
     }
 
     private void RefreshBlacklist()
@@ -333,9 +774,12 @@ public partial class SettingsWindow : Window
     {
         bool selected = ModesList.SelectedItem is TranslationMode;
         bool builtIn = ModesList.SelectedItem is TranslationMode { IsBuiltIn: true };
-        EditModeButton.IsEnabled = selected;
+        bool isCurrent = ModesList.SelectedItem is TranslationMode mode && mode.Id == _settings.CurrentModeId;
+        ApplyModeButton.IsEnabled = selected && !isCurrent;
         DeleteModeButton.IsEnabled = selected && !builtIn;
         RestoreModeButton.IsEnabled = builtIn;
+        ModeNameBox.IsEnabled = selected;
+        ModePromptBox.IsEnabled = selected;
     }
 
     private void ResetDoubleTapTest()
@@ -402,23 +846,11 @@ public partial class SettingsWindow : Window
         return (comboBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? fallback;
     }
 
-    private static string SelectedComboTag(ComboBox comboBox, string fallback)
-    {
-        return (comboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? fallback;
-    }
-
     private static void SelectComboItemByContent(ComboBox comboBox, string content)
     {
         comboBox.SelectedItem = comboBox.Items
             .OfType<ComboBoxItem>()
             .FirstOrDefault(item => string.Equals(item.Content?.ToString(), content, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static void SelectComboItemByTag(ComboBox comboBox, string tag)
-    {
-        comboBox.SelectedItem = comboBox.Items
-            .OfType<ComboBoxItem>()
-            .FirstOrDefault(item => string.Equals(item.Tag?.ToString(), tag, StringComparison.OrdinalIgnoreCase));
     }
 
     private void ExecuteUiAction(string actionName, Action action)
@@ -443,15 +875,38 @@ public partial class SettingsWindow : Window
 
         ExecuteUiAction("切换服务商预设", () =>
         {
-            ProviderPreset preset = ProviderPresets.First(item => item.Name == selected);
-            if (preset.Name != "自定义")
+            ProviderPreset preset = ProviderPresets.Find(selected);
+            if (preset.Name != ProviderPresets.CustomName)
             {
                 BaseUrlBox.Text = preset.BaseUrl;
                 ModelCombo.Text = preset.Model;
+                // 关闭思考的写法各家不同，切预设必须一并换掉，否则会把上一家的参数发给新服务商。
+                ExtraRequestBodyBox.Text = preset.ExtraRequestBody;
+                if (SelectedProfile is { } profile
+                    && (string.IsNullOrWhiteSpace(profile.Name) || profile.Name.StartsWith("新建服务商", StringComparison.Ordinal)))
+                {
+                    profile.Name = _settings.GenerateUniqueProfileName(preset.Name);
+                    ProfileNameBox.Text = profile.Name;
+                }
             }
 
+            UpdateBaseUrlEditability();
+            UpdateExtraRequestBodyValidation();
             SaveAll();
+            RefreshProfiles();
         });
+    }
+
+    /// <summary>
+    /// 已知服务商的 Base URL 由预设决定，不用手填；只有「自定义」才需要自己输入。
+    /// </summary>
+    private void UpdateBaseUrlEditability()
+    {
+        bool isCustom = ProviderPresetCombo.SelectedItem as string == ProviderPresets.CustomName;
+        BaseUrlBox.IsReadOnly = !isCustom;
+        BaseUrlHintText.Text = isCustom
+            ? "填写任意 OpenAI 兼容接口地址，例如 https://api.example.com/v1。"
+            : "由「服务商预设」自动填充；如需手动填写，请把预设切换为「自定义」。";
     }
 
     private void ToggleApiKeyButton_OnClick(object sender, RoutedEventArgs e)
@@ -502,10 +957,13 @@ public partial class SettingsWindow : Window
             _modelFetchCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             FetchModelsButton.IsEnabled = false;
             FetchModelsButton.Content = "正在拉取…";
-            IReadOnlyList<string> models = await OpenAiCompatibleClient.FetchModelsAsync(
-                baseUrl,
-                apiKey,
-                _modelFetchCancellation.Token);
+            CancellationToken cancellationToken = _modelFetchCancellation.Token;
+            // 用 Task.Run 把请求扔到线程池：首次连接某个服务商时，系统代理探测、DNS
+            // 解析等前置开销可能耗时数百毫秒到几秒，且发生在真正的 await 之前，
+            // 若不这样处理，这段耗时会直接卡在 UI 线程上，表现为窗口偶尔"卡顿"。
+            IReadOnlyList<string> models = await Task.Run(
+                () => OpenAiCompatibleClient.FetchModelsAsync(baseUrl, apiKey, cancellationToken),
+                cancellationToken);
             if (models.Count == 0)
             {
                 System.Windows.MessageBox.Show(
@@ -580,74 +1038,110 @@ public partial class SettingsWindow : Window
         });
     }
 
-    private void DiagnosticsButton_OnClick(object sender, RoutedEventArgs e)
+    private void ApplyModeButton_OnClick(object sender, RoutedEventArgs e)
     {
-        ExecuteUiAction("打开一键诊断", _diagnosticsRequested);
-    }
-
-    private void CurrentModeCombo_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_loading || CurrentModeCombo.SelectedValue is not string modeId)
-        {
-            return;
-        }
-
         ExecuteUiAction("切换翻译模式", () =>
         {
-            _settings.CurrentModeId = modeId;
-            SaveAll();
-            ModesList.SelectedItem = _settings.Modes.FirstOrDefault(mode => mode.Id == modeId);
-        });
-    }
-
-    private void ModesList_OnSelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateModeButtons();
-
-    private void NewModeButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        ExecuteUiAction("新建翻译模式", () =>
-        {
-            var editor = new ModeEditorWindow("新建翻译模式", string.Empty, string.Empty) { Owner = this };
-            if (editor.ShowDialog() != true)
+            if (ModesList.SelectedItem is not TranslationMode mode)
             {
+                ShowValidationError("请先在列表中选择要应用的翻译模式。");
                 return;
             }
 
-            var mode = new TranslationMode
-            {
-                Id = $"custom-{Guid.NewGuid():N}",
-                Name = editor.ModeName,
-                SystemPromptTemplate = editor.PromptTemplate,
-                IsBuiltIn = false
-            };
-            _settings.Modes.Add(mode);
             _settings.CurrentModeId = mode.Id;
             RefreshModes(mode.Id);
             SaveAll();
         });
     }
 
-    private void EditModeButton_OnClick(object sender, RoutedEventArgs e)
+    private void ModesList_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        ExecuteUiAction("编辑翻译模式", () =>
+        LoadModeDetails();
+        UpdateModeButtons();
+    }
+
+    private void ModeNameBox_OnLostKeyboardFocus(object sender, System.Windows.Input.KeyboardFocusChangedEventArgs e)
+    {
+        if (_loading || ModesList.SelectedItem is not TranslationMode mode)
         {
-            if (ModesList.SelectedItem is not TranslationMode mode)
-            {
-                ShowValidationError("请先选择要编辑的翻译模式。");
-                return;
-            }
+            return;
+        }
 
-            var editor = new ModeEditorWindow("编辑翻译模式", mode.Name, mode.SystemPromptTemplate) { Owner = this };
-            if (editor.ShowDialog() != true)
-            {
-                return;
-            }
+        string name = ModeNameBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            ShowValidationError("模式名称不能为空。");
+            ModeNameBox.Text = mode.Name;
+            return;
+        }
 
-            mode.Name = editor.ModeName;
-            mode.SystemPromptTemplate = editor.PromptTemplate;
+        mode.Name = name;
+        RefreshModes(mode.Id);
+        SaveAll();
+    }
+
+    private void ModePromptBox_OnLostKeyboardFocus(object sender, System.Windows.Input.KeyboardFocusChangedEventArgs e)
+    {
+        if (_loading || ModesList.SelectedItem is not TranslationMode mode)
+        {
+            return;
+        }
+
+        string prompt = ModePromptBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            ShowValidationError("系统提示词不能为空。");
+            ModePromptBox.Text = mode.SystemPromptTemplate;
+            return;
+        }
+
+        mode.SystemPromptTemplate = prompt;
+        SaveAll();
+    }
+
+    private void NewModeButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        ExecuteUiAction("新建翻译模式", () =>
+        {
+            var mode = new TranslationMode
+            {
+                Id = $"custom-{Guid.NewGuid():N}",
+                Name = GenerateUniqueModeName("新建模式"),
+                SystemPromptTemplate = DefaultNewModePrompt,
+                IsBuiltIn = false
+            };
+            _settings.Modes.Add(mode);
+            _settings.CurrentModeId = mode.Id;
             RefreshModes(mode.Id);
             SaveAll();
+            ModeNameBox.Focus();
+            ModeNameBox.SelectAll();
         });
     }
+
+    private string GenerateUniqueModeName(string baseName)
+    {
+        if (_settings.Modes.All(mode => mode.Name != baseName))
+        {
+            return baseName;
+        }
+
+        int suffix = 2;
+        while (_settings.Modes.Any(mode => mode.Name == $"{baseName} {suffix}"))
+        {
+            suffix++;
+        }
+
+        return $"{baseName} {suffix}";
+    }
+
+    private const string DefaultNewModePrompt = """
+        你是一个精准的翻译引擎。将用户提供的文本翻译成{target_lang}。
+
+        规则：
+        1. 只输出译文本身，不要任何解释、前言、引号。
+        2. 若原文本身已是{target_lang}，则输出{fallback_lang}的译文。
+        """;
 
     private void DeleteModeButton_OnClick(object sender, RoutedEventArgs e)
     {
@@ -936,8 +1430,6 @@ public partial class SettingsWindow : Window
 
     private void GeneralCheckBox_OnClick(object sender, RoutedEventArgs e) => SaveAll();
 
-    private void GeneralComboBox_OnSelectionChanged(object sender, SelectionChangedEventArgs e) => SaveAll();
-
     private void CloseButton_OnClick(object sender, RoutedEventArgs e) => Close();
 
     private void Window_OnClosed(object? sender, EventArgs e)
@@ -946,106 +1438,23 @@ public partial class SettingsWindow : Window
         _modelFetchCancellation?.Cancel();
         _modelFetchCancellation?.Dispose();
         _modelFetchCancellation = null;
+        _testCancellation?.Cancel();
     }
 
-    private sealed record ProviderPreset(string Name, string BaseUrl, string Model);
-}
-
-/// <summary>
-/// 翻译模式的名称与提示词编辑器。
-/// </summary>
-internal sealed class ModeEditorWindow : Window
-{
-    private readonly TextBox _nameBox;
-    private readonly TextBox _promptBox;
-
-    public ModeEditorWindow(string title, string modeName, string promptTemplate)
+    /// <summary>
+    /// 档案列表的显示用包装。ApiProfile 是纯数据模型、没有变更通知，
+    /// 这里沿用本项目已有的做法：改动后整体重建 ItemsSource。
+    /// </summary>
+    private sealed record ProfileListItem(ApiProfile Profile, bool IsCurrent)
     {
-        Title = title;
-        Width = 700;
-        Height = 560;
-        MinWidth = 520;
-        MinHeight = 420;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        ShowInTaskbar = false;
+        public string Name => Profile.Name;
 
-        var grid = new Grid { Margin = new Thickness(16) };
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        public string Detail => string.IsNullOrWhiteSpace(Profile.Model)
+            ? "（还没填模型名）"
+            : Profile.Model;
 
-        var nameLabel = new TextBlock { Text = "名称", Margin = new Thickness(0, 0, 0, 5) };
-        _nameBox = new TextBox { Text = modeName, MinHeight = 28, Margin = new Thickness(0, 0, 0, 12) };
-        Grid.SetRow(_nameBox, 1);
-        var promptLabel = new TextBlock { Text = "系统提示词", Margin = new Thickness(0, 0, 0, 5) };
-        Grid.SetRow(promptLabel, 2);
-        _promptBox = new TextBox
-        {
-            Text = promptTemplate,
-            AcceptsReturn = true,
-            AcceptsTab = true,
-            TextWrapping = TextWrapping.Wrap,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            FontFamily = new FontFamily("Consolas"),
-            Margin = new Thickness(0, 26, 0, 8)
-        };
-        Grid.SetRow(_promptBox, 2);
-        var hint = new TextBlock
-        {
-            Text = "可用占位符：{target_lang}  {fallback_lang}",
-            Margin = new Thickness(0, 0, 0, 12)
-        };
-        hint.SetResourceReference(
-            System.Windows.Controls.TextBlock.ForegroundProperty,
-            "Brush.TextSecondary");
-        Grid.SetRow(hint, 3);
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        var saveButton = new Button { Content = "保存", Width = 88, IsDefault = true };
-        saveButton.Click += SaveButton_OnClick;
-        var cancelButton = new Button { Content = "取消", Width = 88, Margin = new Thickness(8, 0, 0, 0), IsCancel = true };
-        buttons.Children.Add(saveButton);
-        buttons.Children.Add(cancelButton);
-        Grid.SetRow(buttons, 4);
+        public Visibility CurrentVisibility => IsCurrent ? Visibility.Visible : Visibility.Collapsed;
 
-        grid.Children.Add(nameLabel);
-        grid.Children.Add(_nameBox);
-        grid.Children.Add(promptLabel);
-        grid.Children.Add(_promptBox);
-        grid.Children.Add(hint);
-        grid.Children.Add(buttons);
-        Content = grid;
-    }
-
-    public string ModeName => _nameBox.Text.Trim();
-
-    public string PromptTemplate => _promptBox.Text.Trim();
-
-    private void SaveButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(ModeName) || string.IsNullOrWhiteSpace(PromptTemplate))
-            {
-                System.Windows.MessageBox.Show(
-                    "模式名称和系统提示词都需要填写。",
-                    "翻译模式",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
-                return;
-            }
-
-            DialogResult = true;
-        }
-        catch (Exception exception)
-        {
-            Logger.Error("设置", "保存翻译模式编辑内容失败。", exception);
-            System.Windows.MessageBox.Show(
-                "翻译模式没有保存成功，详情已记录到日志。",
-                "翻译模式",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-        }
+        public Visibility FailedVisibility => Profile.IsFailed ? Visibility.Visible : Visibility.Collapsed;
     }
 }
