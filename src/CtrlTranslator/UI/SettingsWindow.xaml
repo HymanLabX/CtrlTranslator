@@ -160,7 +160,7 @@
             </Grid.RowDefinitions>
 
             <Border Margin="28,18,28,0" Padding="4" HorizontalAlignment="Center"
-                    Background="{DynamicResource Brush.SurfaceSubtle}"
+                    Background="{DynamicResource Brush.SurfaceRaised}"
                     BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
                     CornerRadius="{DynamicResource Radius.Medium}">
                 <StackPanel Orientation="Horizontal">
