@@ -124,7 +124,7 @@
                     Style="{StaticResource Button.Secondary}"
                     Content="导出 CSV…" Click="ExportButton_OnClick" />
             <Grid>
-                <TextBox x:Name="SearchBox" Height="34" Padding="32,7,10,7"
+                <TextBox x:Name="SearchBox" MinHeight="34" Padding="32,7,10,7"
                          TextChanged="SearchBox_OnTextChanged" />
                 <Path Width="14" Height="14" Margin="11,0,0,0" Stretch="Uniform"
                       HorizontalAlignment="Left" VerticalAlignment="Center"

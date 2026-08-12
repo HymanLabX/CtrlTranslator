@@ -194,10 +194,10 @@ jobs:
           $name = Split-Path -Leaf '${{ steps.installer.outputs.path }}'
           Copy-Item "installer-signed\$name" '${{ steps.installer.outputs.path }}' -Force
 
-      # SHA256SUMS.txt 不只是给人看的：程序内的自动更新会先从 GitHub 拿到这个文件，
-      # 下载完安装包后逐字节比对，对不上就删掉、绝不执行。
-      # 少了它，"下载一个 exe 然后运行"就等于给自己开了个远程代码执行的口子。
-      # 格式是标准的 `<hash>  <filename>`（两个空格），别改成别的排版。
+      # 这里算哈希只是为了写进发布说明供人核对。
+      # 程序内的自动更新不读它，也不需要额外的校验文件 —— GitHub Releases API
+      # 每个资产自带 digest 字段（sha256:…），更新器直接用那个值比对，
+      # 所以发布产物可以干干净净只有一个安装包。
       - name: 计算最终产物 SHA256
         id: artifact
         shell: pwsh
@@ -206,13 +206,8 @@ jobs:
           $setupName = Split-Path -Leaf $setupPath
           $setupHash = (Get-FileHash $setupPath -Algorithm SHA256).Hash.ToLower()
           $setupSizeMb = [math]::Round((Get-Item $setupPath).Length / 1MB, 1)
-          $exeHash = (Get-FileHash publish/CtrlTranslator.exe -Algorithm SHA256).Hash.ToLower()
-
-          "$setupHash  $setupName" | Set-Content SHA256SUMS.txt -Encoding ascii -NoNewline
-          "`n" | Add-Content SHA256SUMS.txt -Encoding ascii -NoNewline
 
           Write-Host "$setupName  SHA256  $setupHash"
-          Write-Host "CtrlTranslator.exe（仅作安装包输入，不再单独发布）SHA256  $exeHash"
           "setup_name=$setupName" >> $env:GITHUB_OUTPUT
           "setup_sha256=$setupHash" >> $env:GITHUB_OUTPUT
           "setup_size_mb=$setupSizeMb" >> $env:GITHUB_OUTPUT
@@ -257,7 +252,8 @@ jobs:
             '',
             '### 校验',
             '',
-            '`SHA256SUMS.txt` 也是程序内自动更新用来校验安装包的依据，请勿删除该资产。',
+            '想手动核对的话，用 `Get-FileHash 安装包 -Algorithm SHA256` 跟下面这串比对；' +
+            '也可以直接看上方资产列表里 GitHub 自己标出的 `sha256:` 值。',
             '',
             $fence,
             "$env:SETUP_SHA256  $env:SETUP_NAME",
@@ -267,12 +263,15 @@ jobs:
           $lines -join "`n" | Set-Content release-notes.md -Encoding utf8
 
           # tag 里带 rc / beta / alpha / preview 的自动标成预发布。
-          # 只发安装包 + 校验文件：免安装裸 exe 不再作为发布产物（它没法安全地自我更新，
-          # 自我替换的动作在杀毒软件眼里跟蠕虫几乎一样）。它仍然会被构建，作为安装包的输入。
+          #
+          # 发布产物只有安装包一个。两个刻意的取舍：
+          #   1. 免安装裸 exe 不发 —— 它没法安全地自我更新，自我替换的动作在杀毒软件
+          #      眼里跟蠕虫几乎一样。它仍然会被构建，作为安装包的输入。
+          #   2. 不发 SHA256SUMS.txt —— GitHub Releases API 每个资产自带 digest 字段，
+          #      自动更新直接用它校验，再发一个校验文件纯属冗余。
           $ghArgs = @(
             'release', 'create', $env:TAG,
             '${{ steps.installer.outputs.path }}',
-            'SHA256SUMS.txt',
             '--title', "CtrlTranslator $env:TAG",
             '--notes-file', 'release-notes.md'
           )

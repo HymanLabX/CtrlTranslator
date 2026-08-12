@@ -147,7 +147,10 @@
     </ControlTemplate>
 
     <Style x:Key="Button.Secondary" TargetType="{x:Type Button}">
-        <Setter Property="Height" Value="28" />
+        <!-- 必须是 MinHeight 而不是 Height。模板用 Margin={TemplateBinding Padding} 放内容，
+             写死 Height 的话，任何自带纵向 Padding 的按钮都会把文字底部裁掉一截——
+             中文尤其明显，「过」会被削成「讨」。踩过这个坑，别改回 Height。 -->
+        <Setter Property="MinHeight" Value="28" />
         <Setter Property="Padding" Value="12,0" />
         <Setter Property="Background" Value="{DynamicResource Brush.Transparent}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />

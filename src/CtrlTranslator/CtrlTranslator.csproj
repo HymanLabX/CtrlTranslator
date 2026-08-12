@@ -14,9 +14,9 @@
     <ApplicationIcon>Assets\ctrltranslator.ico</ApplicationIcon>
     <AssemblyName>CtrlTranslator</AssemblyName>
     <RootNamespace>CtrlTranslator</RootNamespace>
-    <Version>1.0.0</Version>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
+    <Version>1.0.1</Version>
+    <AssemblyVersion>1.0.1.0</AssemblyVersion>
+    <FileVersion>1.0.1.0</FileVersion>
     <Product>CtrlTranslator</Product>
     <Company>CtrlTranslator</Company>
     <Description>Windows 全局划词翻译工具</Description>

@@ -392,7 +392,9 @@ public partial class SettingsWindow : Window
         BaseUrlBox.Text = profile.BaseUrl;
         ApiKeyPasswordBox.Password = profile.ApiKey;
         ApiKeyVisibleBox.Text = profile.ApiKey;
-        ModelCombo.ItemsSource = null;
+        // 先用该服务商的常用模型填下拉框，用户不必为了换个模型去等一次网络请求。
+        // 点「拉取可用模型」仍然会用服务商返回的权威列表覆盖它。
+        ModelCombo.ItemsSource = ProviderPresets.Find(profile.ProviderPreset).Models;
         ModelCombo.Text = profile.Model;
         TemperatureBox.Text = profile.Temperature.ToString("0.##", CultureInfo.CurrentCulture);
         MaxTokensBox.Text = profile.MaxTokens.ToString(CultureInfo.CurrentCulture);
@@ -876,6 +878,7 @@ public partial class SettingsWindow : Window
         ExecuteUiAction("切换服务商预设", () =>
         {
             ProviderPreset preset = ProviderPresets.Find(selected);
+            ModelCombo.ItemsSource = preset.Models;
             if (preset.Name != ProviderPresets.CustomName)
             {
                 BaseUrlBox.Text = preset.BaseUrl;

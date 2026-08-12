@@ -913,13 +913,19 @@ dotnet publish src/CtrlTranslator/CtrlTranslator.csproj `
 - exe 需带图标和文件版本信息（`ApplicationIcon`、`AssemblyVersion`、`FileVersion`、
   `Product = CtrlTranslator`）
 
-> **M6 变更：对外只发安装包。**
-> Release 资产固定为两个：`CtrlTranslator-Setup-<版本>.exe` 和 `SHA256SUMS.txt`。
-> 裸 exe 不再作为发布产物 —— 它没有安装记录可供覆盖，自我替换的动作在杀毒软件眼里
-> 几乎等同蠕虫；它仍然会被构建，因为它是安装包的输入，也用于本机验证打包产物。
+> **M6 变更：对外只发安装包，且只发一个资产。**
+> Release 资产就是 `CtrlTranslator-Setup-<版本>.exe` 一个文件。
 >
-> `SHA256SUMS.txt` **不是给人看的装饰**：程序内的自动更新靠它校验下载到的安装包，
-> 缺了它老版本会拒绝更新（这是有意的）。**发版时不得删除该资产。**
+> - 裸 exe 不作为发布产物 —— 它没有安装记录可供覆盖，自我替换的动作在杀毒软件眼里
+>   几乎等同蠕虫；它仍然会被构建，因为它是安装包的输入，也用于本机验证打包产物。
+> - 不发校验文件 —— GitHub Releases API 的每个资产自带 `digest`（`sha256:…`），
+>   自动更新直接用它比对下载到的文件，额外发一份校验文件纯属冗余。
+>
+> **校验能力的边界（有意为之）**：元数据走 `api.github.com`、安装包走
+> `objects.githubusercontent.com`，两条链路互相印证，能挡住下载截断、CDN 出错、
+> 传输被改动；但**挡不住仓库或 GitHub 账号被攻破**（攻击者换掉资产后 GitHub 会重算
+> digest）。防那种情况需要私钥离线的非对称签名。本项目定位为自用与少数同事共享，
+> 明确不把"仓库被攻破"纳入威胁模型，不引入密钥管理的长期负担。
 >
 > 发版前必须同步修改 `csproj` 里的 `Version` / `AssemblyVersion` / `FileVersion`，
 > 否则装上新版后程序仍自认旧版本，会永远提示有更新。

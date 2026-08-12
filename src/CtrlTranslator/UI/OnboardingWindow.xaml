@@ -43,16 +43,20 @@
         </DockPanel>
 
         <Grid Grid.Row="1" Margin="0,24,0,18">
-            <StackPanel x:Name="WelcomePage" VerticalAlignment="Center" HorizontalAlignment="Center" Width="600">
-                <TextBlock FontSize="30" FontWeight="SemiBold" TextAlignment="Center" Text="选中文字，双击 Ctrl，马上翻译"/>
-                <Border Margin="70,30" Padding="28" Background="{DynamicResource Brush.AccentSubtle}" CornerRadius="12">
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                        <TextBlock FontSize="24" Text="选中文字"/>
-                        <TextBlock Margin="20,0" FontSize="24" Text="→"/>
-                        <TextBlock FontSize="24" Text="Ctrl  Ctrl"/>
-                        <TextBlock Margin="20,0" FontSize="24" Text="→"/>
-                        <TextBlock FontSize="24" Text="鼠标旁显示译文"/>
-                    </StackPanel>
+            <!-- 不要再给这层加固定 Width：外面 Grid 的宽度就是可用宽度，
+                 写死宽度再套 Margin/Padding 会把里面那行示意图挤到裁掉两端（踩过）。 -->
+            <StackPanel x:Name="WelcomePage" VerticalAlignment="Center">
+                <TextBlock FontSize="28" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap"
+                           Text="选中文字，双击 Ctrl，马上翻译"/>
+                <Border Margin="0,28" Padding="20,22" Background="{DynamicResource Brush.AccentSubtle}" CornerRadius="12">
+                    <!-- 用 WrapPanel：窗口再窄也只会换行，不会把字切掉 -->
+                    <WrapPanel HorizontalAlignment="Center">
+                        <TextBlock FontSize="20" Text="选中文字" VerticalAlignment="Center"/>
+                        <TextBlock Margin="14,0" FontSize="20" Text="→" VerticalAlignment="Center"/>
+                        <TextBlock FontSize="20" Text="Ctrl  Ctrl" VerticalAlignment="Center"/>
+                        <TextBlock Margin="14,0" FontSize="20" Text="→" VerticalAlignment="Center"/>
+                        <TextBlock FontSize="20" Text="鼠标旁显示译文" VerticalAlignment="Center"/>
+                    </WrapPanel>
                 </Border>
                 <TextBlock FontSize="15" TextWrapping="Wrap" TextAlignment="Center"
                            Text="需要一个支持 OpenAI 兼容接口的翻译服务 API Key。Key 只加密保存在这台电脑上。"/>
@@ -86,19 +90,53 @@
                            Text="如果连接失败，请到服务商官网核对最新的接口地址和模型名。"/>
             </Grid>
 
+            <!-- 输入控件一律用 MinHeight 而不是 Height：写死高度时，
+                 内容比"高度减去内边距"高一点点就会被裁掉底部，中文字体尤其容易踩到。 -->
             <StackPanel x:Name="CredentialsPage" Visibility="Collapsed">
                 <TextBlock FontSize="20" FontWeight="SemiBold" Text="填写连接信息"/>
-                <TextBlock Margin="0,18,0,5" Text="服务地址"/>
-                <TextBox x:Name="BaseUrlBox" Height="34" Padding="8,5"/>
-                <TextBlock Margin="0,14,0,5" Text="API Key"/>
-                <PasswordBox x:Name="ApiKeyBox" Height="34" Padding="8,5"/>
-                <TextBlock Margin="0,14,0,5" Text="模型"/>
+                <TextBlock x:Name="CredentialsProviderText" Margin="0,8,0,0" TextWrapping="Wrap"
+                           Foreground="{DynamicResource Brush.TextSecondary}"/>
+
+                <TextBlock Margin="0,20,0,5" Text="API Key"/>
                 <DockPanel>
-                    <Button DockPanel.Dock="Right" Margin="10,0,0,0" Padding="13,5" Content="拉取可用模型"
-                            Click="FetchModelsButton_OnClick"/>
-                    <ComboBox x:Name="ModelBox" Height="34" Padding="7,4" IsEditable="True"/>
+                    <Button x:Name="ApplyKeyButton" DockPanel.Dock="Right" Margin="10,0,0,0" Padding="13,6"
+                            Content="去申请 Key" Click="ApplyKeyButton_OnClick"/>
+                    <PasswordBox x:Name="ApiKeyBox" MinHeight="34" Padding="8,7"/>
                 </DockPanel>
-                <TextBlock x:Name="CredentialsStatusText" Margin="0,14,0,0" Foreground="{DynamicResource Brush.TextSecondary}" TextWrapping="Wrap"/>
+
+                <TextBlock Margin="0,16,0,5" Text="模型"/>
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Margin="10,0,0,0" Padding="13,6" Content="拉取可用模型"
+                            Click="FetchModelsButton_OnClick"/>
+                    <ComboBox x:Name="ModelBox" MinHeight="34" Padding="8,6" IsEditable="True"/>
+                </DockPanel>
+                <TextBlock Margin="0,6,0,0" TextWrapping="Wrap"
+                           FontSize="{DynamicResource Size.BodySmall}"
+                           Foreground="{DynamicResource Brush.TextTertiary}"
+                           Text="下拉里是这家常用的几个模型，直接选一个就行。想用别的可以手输，或点「拉取可用模型」看完整列表（要等几秒）。"/>
+
+                <!-- 已知服务商的地址由预设决定，不让用户填 —— 填错地址是新手最常见的卡点。
+                     只有「自定义」才露出可编辑的输入框。 -->
+                <StackPanel x:Name="KnownBaseUrlPanel" Margin="0,16,0,0">
+                    <TextBlock Margin="0,0,0,4" Foreground="{DynamicResource Brush.TextTertiary}"
+                               FontSize="{DynamicResource Size.BodySmall}" Text="服务地址（已自动填好，无需修改）"/>
+                    <TextBlock x:Name="BaseUrlDisplayText" TextWrapping="Wrap"
+                               FontFamily="{DynamicResource Font.Mono}"
+                               FontSize="{DynamicResource Size.BodySmall}"
+                               Foreground="{DynamicResource Brush.TextSecondary}"/>
+                </StackPanel>
+
+                <StackPanel x:Name="CustomBaseUrlPanel" Margin="0,16,0,0" Visibility="Collapsed">
+                    <TextBlock Margin="0,0,0,5" Text="服务地址"/>
+                    <TextBox x:Name="BaseUrlBox" MinHeight="34" Padding="8,7"/>
+                    <TextBlock Margin="0,5,0,0" TextWrapping="Wrap"
+                               FontSize="{DynamicResource Size.BodySmall}"
+                               Foreground="{DynamicResource Brush.TextTertiary}"
+                               Text="填写任意 OpenAI 兼容接口的地址，例如 https://api.example.com/v1。"/>
+                </StackPanel>
+
+                <TextBlock x:Name="CredentialsStatusText" Margin="0,16,0,0"
+                           Foreground="{DynamicResource Brush.Danger}" TextWrapping="Wrap"/>
             </StackPanel>
 
             <Grid x:Name="TestPage" Visibility="Collapsed">
