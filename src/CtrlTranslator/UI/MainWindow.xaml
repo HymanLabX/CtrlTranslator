@@ -42,6 +42,13 @@
             </Setter>
         </Style>
 
+        <Style x:Key="SettingsSubNavItem" TargetType="ListBoxItem"
+               BasedOn="{StaticResource {x:Type ListBoxItem}}">
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="10,7" />
+            <Setter Property="FontSize" Value="{DynamicResource Size.BodySmall}" />
+        </Style>
+
         <Style x:Key="HistoryItem" TargetType="ListBoxItem">
             <Setter Property="MinHeight" Value="66" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -129,22 +136,19 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <StackPanel Margin="8,2,8,26">
-                    <Border Width="42" Height="42" HorizontalAlignment="Left"
-                            Background="{DynamicResource Brush.Primary}"
-                            CornerRadius="{DynamicResource Radius.Medium}">
-                        <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
-                                   FontFamily="{DynamicResource Font.Display}" FontSize="20"
-                                   FontWeight="SemiBold" Foreground="{DynamicResource Brush.OnAccent}"
-                                   Text="译" />
-                    </Border>
-                    <TextBlock Margin="0,13,0,0" FontFamily="{DynamicResource Font.Display}"
+                <StackPanel Margin="8,2,8,26" Orientation="Horizontal">
+                    <Image Width="34" Height="34" VerticalAlignment="Center"
+                           Source="pack://application:,,,/Assets/ctrltranslator.ico"
+                           AutomationProperties.Name="CtrlTranslator 程序图标" />
+                    <TextBlock Margin="10,0,0,0" VerticalAlignment="Center"
+                               FontFamily="{DynamicResource Font.Display}"
                                FontSize="{DynamicResource Size.Title}" FontWeight="SemiBold"
                                Text="CtrlTranslator" />
                 </StackPanel>
 
                 <StackPanel Grid.Row="1">
                     <RadioButton x:Name="AllTabButton" Style="{StaticResource SideNavToggle}"
+                                 GroupName="PrimaryNavigation"
                                  IsChecked="True" Checked="HistoryTab_OnChecked">
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
@@ -157,6 +161,7 @@
                         </Grid>
                     </RadioButton>
                     <RadioButton x:Name="StarredTabButton" Style="{StaticResource SideNavToggle}"
+                                 GroupName="PrimaryNavigation"
                                  Checked="HistoryTab_OnChecked">
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
@@ -168,17 +173,30 @@
                                        Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
                         </Grid>
                     </RadioButton>
-                    <Button Style="{StaticResource Button.Ghost}" Margin="0,2" Padding="13,10"
-                            HorizontalContentAlignment="Stretch" Click="SettingsButton_OnClick">
+                    <RadioButton x:Name="SettingsTabButton" Style="{StaticResource SideNavToggle}"
+                                 GroupName="PrimaryNavigation" Checked="SettingsTab_OnChecked">
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                             <Path Width="17" Height="17" Stretch="Uniform" Data="{DynamicResource Icon.Settings}"
-                                  Stroke="{DynamicResource Brush.TextSecondary}" StrokeThickness="1.5"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" StrokeThickness="1.5"
                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
                             <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="设置"
-                                       Foreground="{DynamicResource Brush.TextSecondary}" />
+                                       Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
                         </Grid>
-                    </Button>
+                    </RadioButton>
+                    <ListBox x:Name="SettingsSectionNav" Margin="14,4,0,8"
+                             BorderThickness="0" Background="{DynamicResource Brush.Transparent}"
+                             ItemContainerStyle="{StaticResource SettingsSubNavItem}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             Visibility="Collapsed" SelectedIndex="0"
+                             SelectionChanged="SettingsSectionNav_OnSelectionChanged">
+                        <ListBoxItem Content="服务商档案" />
+                        <ListBoxItem Content="模型参数" />
+                        <ListBoxItem Content="翻译行为" />
+                        <ListBoxItem Content="触发方式" />
+                        <ListBoxItem Content="隐私与安全" />
+                        <ListBoxItem Content="系统" />
+                    </ListBox>
                 </StackPanel>
 
                 <DockPanel Grid.Row="3" Margin="8,0">
@@ -194,7 +212,8 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Column="1" Margin="34,28,34,32">
+        <Grid Grid.Column="1">
+        <Grid x:Name="HistoryContent" Margin="34,28,34,32">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -329,6 +348,10 @@
                                Foreground="{DynamicResource Brush.TextTertiary}" />
                 </Grid>
             </Grid>
+        </Grid>
+
+        <ContentControl x:Name="SettingsHost" Visibility="Collapsed"
+                        KeyboardNavigation.TabNavigation="Local" />
         </Grid>
     </Grid>
 </Window>

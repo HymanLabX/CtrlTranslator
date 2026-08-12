@@ -64,19 +64,15 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <StackPanel>
-                    <Border Width="48" Height="48" HorizontalAlignment="Left"
-                            Background="{DynamicResource Brush.Primary}"
-                            CornerRadius="{DynamicResource Radius.Large}"
-                            Effect="{DynamicResource Effect.CardGlow}">
-                        <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
-                                   FontFamily="{DynamicResource Font.Display}" FontSize="22"
-                                   FontWeight="SemiBold" Foreground="{DynamicResource Brush.OnAccent}"
-                                   Text="译" />
-                    </Border>
-                    <TextBlock Margin="0,16,0,0" FontFamily="{DynamicResource Font.Display}"
-                               FontSize="{DynamicResource Size.Title}" FontWeight="SemiBold"
-                               Text="CtrlTranslator" />
-                    <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource Brush.TextTertiary}"
+                    <StackPanel Orientation="Horizontal">
+                        <Image Width="28" Height="28" VerticalAlignment="Center"
+                               Source="pack://application:,,,/Assets/ctrltranslator.ico"
+                               AutomationProperties.Name="CtrlTranslator 程序图标" />
+                        <TextBlock Margin="8,0,0,0" VerticalAlignment="Center"
+                                   FontFamily="{DynamicResource Font.Display}" FontSize="15"
+                                   FontWeight="SemiBold" Text="CtrlTranslator" />
+                    </StackPanel>
+                    <TextBlock Margin="0,8,0,0" Foreground="{DynamicResource Brush.TextTertiary}"
                                FontSize="{DynamicResource Size.BodySmall}" Text="让阅读不中断" />
                 </StackPanel>
 
