@@ -103,6 +103,7 @@
             <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                               VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
                               Margin="{TemplateBinding Padding}"
+                              TextElement.Foreground="{TemplateBinding Foreground}"
                               RecognizesAccessKey="True" />
         </Grid>
         <ControlTemplate.Triggers>
@@ -147,6 +148,7 @@
             </Trigger>
             <Trigger Property="IsEnabled" Value="False">
                 <Setter Property="Foreground" Value="{DynamicResource Brush.TextTertiary}" />
+                <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.TextTertiary}" />
                 <Setter TargetName="BaseBorder" Property="Background" Value="{DynamicResource Brush.SurfaceSubtle}" />
                 <Setter TargetName="BaseBorder" Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
                 <Setter TargetName="HoverLayer" Property="Opacity" Value="0" />
@@ -164,9 +166,15 @@
                     CornerRadius="{DynamicResource Radius.Small}" Opacity="0" />
             <Border x:Name="PressedLayer" Background="{DynamicResource Brush.AccentPressed}"
                     CornerRadius="{DynamicResource Radius.Small}" Opacity="0" />
-            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                              Margin="{TemplateBinding Padding}" RecognizesAccessKey="True" />
+            <TextBlock x:Name="PrimaryContent"
+                       Text="{TemplateBinding Content}"
+                       HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                       VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                       Margin="{TemplateBinding Padding}"
+                       FontFamily="{TemplateBinding FontFamily}"
+                       FontSize="{TemplateBinding FontSize}"
+                       FontWeight="{TemplateBinding FontWeight}"
+                       Foreground="{DynamicResource Brush.OnAccent}" />
         </Grid>
         <ControlTemplate.Triggers>
             <MultiTrigger>
@@ -207,6 +215,8 @@
             </Trigger>
             <Trigger Property="IsEnabled" Value="False">
                 <Setter Property="Foreground" Value="{DynamicResource Brush.TextTertiary}" />
+                <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.TextTertiary}" />
+                <Setter TargetName="PrimaryContent" Property="Foreground" Value="{DynamicResource Brush.TextTertiary}" />
                 <Setter TargetName="BaseBorder" Property="Background" Value="{DynamicResource Brush.SurfaceSubtle}" />
                 <Setter TargetName="BaseBorder" Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
                 <Setter TargetName="HoverLayer" Property="Opacity" Value="0" />
@@ -237,6 +247,7 @@
         <Setter Property="Background" Value="{DynamicResource Brush.Primary}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.Accent}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.OnAccent}" />
         <Setter Property="Template" Value="{StaticResource Button.PrimaryTemplate}" />
     </Style>
     <Style x:Key="Button.Ghost" TargetType="{x:Type Button}" BasedOn="{StaticResource Button.Secondary}">
