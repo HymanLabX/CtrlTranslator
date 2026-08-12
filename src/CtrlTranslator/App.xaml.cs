@@ -144,7 +144,6 @@ public partial class App : System.Windows.Application
         try
         {
             _popupWindow?.Close();
-            _settingsWindow?.Close();
             _mainWindow?.Close();
             _onboardingWindow?.Close();
             _updateWindow?.Close();
@@ -780,25 +779,9 @@ public partial class App : System.Windows.Application
     {
         try
         {
-            if (_historyRepository is null)
-            {
-                throw new InvalidOperationException("历史服务尚未初始化。");
-            }
-
-            if (_mainWindow is null)
-            {
-                _mainWindow = new MainWindow(_historyRepository);
-                _mainWindow.SettingsRequested += MainWindow_OnSettingsRequested;
-                _mainWindow.Closed += MainWindow_OnClosed;
-            }
-
-            if (_mainWindow.WindowState == WindowState.Minimized)
-            {
-                _mainWindow.WindowState = WindowState.Normal;
-            }
-
-            _mainWindow.Show();
-            _mainWindow.Activate();
+            MainWindow window = GetOrCreateMainWindow();
+            window.ShowHistory();
+            ActivateMainWindow(window);
         }
         catch (Exception exception)
         {
@@ -812,18 +795,13 @@ public partial class App : System.Windows.Application
     {
         if (sender is MainWindow window)
         {
-            window.SettingsRequested -= MainWindow_OnSettingsRequested;
             window.Closed -= MainWindow_OnClosed;
             if (ReferenceEquals(_mainWindow, window))
             {
                 _mainWindow = null;
+                _settingsWindow = null;
             }
         }
-    }
-
-    private void MainWindow_OnSettingsRequested(object? sender, EventArgs e)
-    {
-        ShowSettingsWindow(focusExtraRequestBody: false);
     }
 
     /// <summary>
@@ -1046,60 +1024,55 @@ public partial class App : System.Windows.Application
     {
         try
         {
-            if (_settings is null || _settingsStore is null || _historyRepository is null)
-            {
-                Logger.Error("设置", "用户打开设置窗口，但设置或历史服务尚未初始化。");
-                System.Windows.MessageBox.Show(
-                    "设置窗口还没有准备好，请退出程序后重新打开再试。",
-                    "CtrlTranslator",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
-                return;
-            }
-
-            if (_settingsWindow is null)
-            {
-                _settingsWindow = new SettingsWindow(
-                    _settings,
-                    _settingsStore,
-                    _historyRepository,
-                    OnSettingsChanged,
-                    CreateDiagnosticRunner,
-                    _updateService,
-                    ShowUpdateWindow);
-                _settingsWindow.Closed += SettingsWindow_OnClosed;
-            }
-
-            if (_settingsWindow.WindowState == WindowState.Minimized)
-            {
-                _settingsWindow.WindowState = WindowState.Normal;
-            }
-
-            _settingsWindow.Show();
-            _settingsWindow.Activate();
-            _settingsWindow.ShowTranslationService(focusExtraRequestBody);
+            MainWindow window = GetOrCreateMainWindow();
+            window.ShowSettings(focusExtraRequestBody);
+            ActivateMainWindow(window);
         }
         catch (Exception exception)
         {
-            Logger.Error("设置", "打开设置窗口失败。", exception);
+            Logger.Error("设置", "在主窗口中打开设置失败。", exception);
             System.Windows.MessageBox.Show(
-                "设置窗口没有打开成功，详情已记录到日志。请稍后再试。",
+                "设置页面没有打开成功，详情已记录到日志。请稍后再试。",
                 "CtrlTranslator",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
     }
 
-    private void SettingsWindow_OnClosed(object? sender, EventArgs e)
+    private MainWindow GetOrCreateMainWindow()
     {
-        if (sender is SettingsWindow window)
+        if (_mainWindow is not null)
         {
-            window.Closed -= SettingsWindow_OnClosed;
-            if (ReferenceEquals(_settingsWindow, window))
-            {
-                _settingsWindow = null;
-            }
+            return _mainWindow;
         }
+
+        if (_settings is null || _settingsStore is null || _historyRepository is null)
+        {
+            throw new InvalidOperationException("设置或历史服务尚未初始化。");
+        }
+
+        _settingsWindow = new SettingsWindow(
+            _settings,
+            _settingsStore,
+            _historyRepository,
+            OnSettingsChanged,
+            CreateDiagnosticRunner,
+            _updateService,
+            ShowUpdateWindow);
+        _mainWindow = new MainWindow(_historyRepository, _settingsWindow);
+        _mainWindow.Closed += MainWindow_OnClosed;
+        return _mainWindow;
+    }
+
+    private static void ActivateMainWindow(MainWindow window)
+    {
+        if (window.WindowState == WindowState.Minimized)
+        {
+            window.WindowState = WindowState.Normal;
+        }
+
+        window.Show();
+        window.Activate();
     }
 
     private void OnSettingsChanged(SettingsChangeKind changeKind)

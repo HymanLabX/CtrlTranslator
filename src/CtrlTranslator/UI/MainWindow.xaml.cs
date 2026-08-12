@@ -14,18 +14,19 @@ public partial class MainWindow : Window
 {
     private const int PageSize = 500;
     private readonly HistoryRepository _repository;
+    private readonly SettingsWindow _settingsView;
     private readonly ObservableCollection<TranslationRecord> _records = [];
     private readonly DispatcherTimer _searchTimer;
     private CancellationTokenSource? _loadCancellation;
     private bool _loading;
     private bool _hasMore = true;
 
-    public event EventHandler? SettingsRequested;
-
-    public MainWindow(HistoryRepository repository)
+    public MainWindow(HistoryRepository repository, SettingsWindow settingsView)
     {
         InitializeComponent();
         _repository = repository;
+        _settingsView = settingsView;
+        SettingsHost.Content = settingsView;
         HistoryGrid.ItemsSource = _records;
         _searchTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         _searchTimer.Tick += SearchTimer_OnTick;
@@ -39,6 +40,22 @@ public partial class MainWindow : Window
     public async Task RefreshAsync()
     {
         await ReloadAsync();
+    }
+
+    /// <summary>切换到历史工作台。主窗口被第二个实例唤醒时也统一回到这里。</summary>
+    public void ShowHistory()
+    {
+        AllTabButton.IsChecked = true;
+        ShowHistoryContent();
+    }
+
+    /// <summary>在主窗口内部打开设置，不再创建第二个顶级窗口。</summary>
+    public void ShowSettings(bool focusExtraRequestBody)
+    {
+        SettingsTabButton.IsChecked = true;
+        ShowSettingsContent();
+        SettingsSectionNav.SelectedIndex = focusExtraRequestBody ? 1 : 0;
+        _settingsView.ShowTranslationService(focusExtraRequestBody);
     }
 
     private async void MainWindow_OnLoaded(object sender, RoutedEventArgs e)
@@ -91,6 +108,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        ShowHistoryContent();
         try
         {
             await ReloadAsync();
@@ -222,9 +240,36 @@ public partial class MainWindow : Window
         }
     }
 
-    private void SettingsButton_OnClick(object sender, RoutedEventArgs e)
+    private void SettingsTab_OnChecked(object sender, RoutedEventArgs e)
     {
-        SettingsRequested?.Invoke(this, EventArgs.Empty);
+        if (IsLoaded)
+        {
+            ShowSettingsContent();
+        }
+    }
+
+    private void SettingsSectionNav_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (IsLoaded && SettingsSectionNav.SelectedIndex >= 0)
+        {
+            _settingsView.SelectSection(SettingsSectionNav.SelectedIndex);
+        }
+    }
+
+    private void ShowHistoryContent()
+    {
+        Title = "CtrlTranslator 翻译历史";
+        HistoryContent.Visibility = Visibility.Visible;
+        SettingsHost.Visibility = Visibility.Collapsed;
+        SettingsSectionNav.Visibility = Visibility.Collapsed;
+    }
+
+    private void ShowSettingsContent()
+    {
+        Title = "CtrlTranslator 设置";
+        HistoryContent.Visibility = Visibility.Collapsed;
+        SettingsHost.Visibility = Visibility.Visible;
+        SettingsSectionNav.Visibility = Visibility.Visible;
     }
 
     private Task ReloadAsync() => LoadNextPageAsync(reset: true);

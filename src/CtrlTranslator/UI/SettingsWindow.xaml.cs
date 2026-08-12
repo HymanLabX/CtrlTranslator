@@ -27,10 +27,10 @@ public enum SettingsChangeKind
 }
 
 /// <summary>
-/// 左侧导航 + 右侧卡片的设置窗口。字段离开编辑状态后立即保存，开关和下拉选择则点击后立即保存。
+/// 嵌入主窗口的设置视图。字段离开编辑状态后立即保存，开关和下拉选择则点击后立即保存。
 /// 连接信息与模型参数写入<b>列表里选中的那个档案</b>，不一定是当前正在用的档案。
 /// </summary>
-public partial class SettingsWindow : Window
+public partial class SettingsWindow : System.Windows.Controls.UserControl
 {
     private const int ProfilesSectionIndex = 0;
     private const int ModelParamsSectionIndex = 1;
@@ -88,7 +88,7 @@ public partial class SettingsWindow : Window
 
         LoadControlsFromSettings();
         RefreshProcessList();
-        SectionNav.SelectedIndex = ProfilesSectionIndex;
+        SelectSection(ProfilesSectionIndex);
         _loading = false;
         UpdateExtraRequestBodyValidation();
         UpdateModeButtons();
@@ -99,19 +99,22 @@ public partial class SettingsWindow : Window
     {
         if (focusExtraRequestBody)
         {
-            SectionNav.SelectedIndex = ModelParamsSectionIndex;
-            ExtraRequestBodyBox.Focus();
-            ExtraRequestBodyBox.SelectAll();
+            SelectSection(ModelParamsSectionIndex);
+            Dispatcher.BeginInvoke(() =>
+            {
+                ExtraRequestBodyBox.Focus();
+                ExtraRequestBodyBox.SelectAll();
+            }, DispatcherPriority.Input);
             return;
         }
 
-        SectionNav.SelectedIndex = ProfilesSectionIndex;
+        SelectSection(ProfilesSectionIndex);
     }
 
     /// <summary>打开「服务商档案」页并立刻跑一遍测试。浮窗上那些"查不出原因"的错误走这条路。</summary>
     internal void ShowProfileTest()
     {
-        SectionNav.SelectedIndex = ProfilesSectionIndex;
+        SelectSection(ProfilesSectionIndex);
         _ = RunProfileTestAsync();
     }
 
@@ -145,9 +148,13 @@ public partial class SettingsWindow : Window
 
     private ApiProfile? SelectedProfile => (ProfilesList.SelectedItem as ProfileListItem)?.Profile;
 
-    private void SectionNav_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    internal void SelectSection(int index)
     {
-        int index = SectionNav.SelectedIndex;
+        if (index < 0 || index >= _sections.Length)
+        {
+            return;
+        }
+
         for (int position = 0; position < _sections.Length; position++)
         {
             _sections[position].Visibility = position == index
@@ -488,7 +495,7 @@ public partial class SettingsWindow : Window
             if (_settings.Profiles.Count <= 1)
             {
                 System.Windows.MessageBox.Show(
-                    this,
+                    Window.GetWindow(this),
                     "至少要保留一个服务商档案。想换服务商的话，直接改这个档案的内容就行。",
                     "删除服务商档案",
                     MessageBoxButton.OK,
@@ -497,7 +504,7 @@ public partial class SettingsWindow : Window
             }
 
             if (System.Windows.MessageBox.Show(
-                    this,
+                    Window.GetWindow(this),
                     $"确定删除档案「{profile.Name}」吗？它的 API Key 会一并删除。",
                     "删除服务商档案",
                     MessageBoxButton.YesNo,
@@ -1399,18 +1406,21 @@ public partial class SettingsWindow : Window
     {
         try
         {
+            Window owner = Window.GetWindow(this)
+                ?? throw new InvalidOperationException("设置视图尚未连接到主窗口。");
             string? path = await HistoryCsvExporter.ExportAsync(
-                _historyRepository, this, CancellationToken.None);
+                _historyRepository, owner, CancellationToken.None);
             if (path is not null)
             {
-                System.Windows.MessageBox.Show(this, "历史记录已导出。", "导出完成",
+                System.Windows.MessageBox.Show(owner, "历史记录已导出。", "导出完成",
                     MessageBoxButton.OK, MessageBoxImage.Information);
             }
         }
         catch (Exception exception)
         {
             Logger.Error("设置", "从设置窗口导出历史失败。", exception);
-            System.Windows.MessageBox.Show(this, "导出失败，请确认保存位置可写后重试。", "导出失败",
+            Window? owner = Window.GetWindow(this);
+            System.Windows.MessageBox.Show(owner, "导出失败，请确认保存位置可写后重试。", "导出失败",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -1433,9 +1443,7 @@ public partial class SettingsWindow : Window
 
     private void GeneralCheckBox_OnClick(object sender, RoutedEventArgs e) => SaveAll();
 
-    private void CloseButton_OnClick(object sender, RoutedEventArgs e) => Close();
-
-    private void Window_OnClosed(object? sender, EventArgs e)
+    private void SettingsView_OnUnloaded(object sender, RoutedEventArgs e)
     {
         _triggerSaveTimer.Stop();
         _modelFetchCancellation?.Cancel();
