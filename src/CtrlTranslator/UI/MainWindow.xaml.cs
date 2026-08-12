@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Threading;
 using CtrlTranslator.Data;
 using CtrlTranslator.Diagnostics;
 using Clipboard = System.Windows.Clipboard;
@@ -16,7 +15,6 @@ public partial class MainWindow : Window
     private readonly HistoryRepository _repository;
     private readonly SettingsWindow _settingsView;
     private readonly ObservableCollection<TranslationRecord> _records = [];
-    private readonly DispatcherTimer _searchTimer;
     private CancellationTokenSource? _loadCancellation;
     private bool _loading;
     private bool _hasMore = true;
@@ -28,8 +26,6 @@ public partial class MainWindow : Window
         _settingsView = settingsView;
         SettingsHost.Content = settingsView;
         HistoryGrid.ItemsSource = _records;
-        _searchTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
-        _searchTimer.Tick += SearchTimer_OnTick;
         Loaded += MainWindow_OnLoaded;
         Closed += MainWindow_OnClosed;
     }
@@ -69,28 +65,8 @@ public partial class MainWindow : Window
 
     private void MainWindow_OnClosed(object? sender, EventArgs e)
     {
-        _searchTimer.Stop();
         _loadCancellation?.Cancel();
         _loadCancellation?.Dispose();
-    }
-
-    private void SearchBox_OnTextChanged(object sender, TextChangedEventArgs e)
-    {
-        _searchTimer.Stop();
-        _searchTimer.Start();
-    }
-
-    private async void SearchTimer_OnTick(object? sender, EventArgs e)
-    {
-        _searchTimer.Stop();
-        try
-        {
-            await ReloadAsync();
-        }
-        catch (Exception exception)
-        {
-            ShowLoadError(exception);
-        }
     }
 
     /// <summary>
@@ -155,9 +131,8 @@ public partial class MainWindow : Window
             ? string.Empty
             : $"服务商：{record.ProfileName}　";
         MetadataText.Text =
-            $"{provider}模式：{DisplayModeName(record.ModeId)}　模型：{record.Model}　来源程序：{record.AppName ?? "未知"}　"
-            + $"耗时：{record.LatencyMilliseconds?.ToString() ?? "未知"} 毫秒　"
-            + $"时间：{record.CreatedAt:yyyy-MM-dd HH:mm:ss}";
+            $"{provider}模型：{record.Model}　来源程序：{record.AppName ?? "未知"}　"
+            + $"耗时：{record.LatencyMilliseconds?.ToString() ?? "未知"} 毫秒";
     }
 
     private async void HistoryGrid_OnScrollChanged(object sender, ScrollChangedEventArgs e)
@@ -204,7 +179,7 @@ public partial class MainWindow : Window
 
     private async void ToggleStar_OnClick(object sender, RoutedEventArgs e)
     {
-        TranslationRecord? record = SelectedRecord;
+        TranslationRecord? record = RecordFromActionSource(sender);
         if (record is null)
         {
             return;
@@ -224,7 +199,7 @@ public partial class MainWindow : Window
 
     private async void DeleteRecord_OnClick(object sender, RoutedEventArgs e)
     {
-        TranslationRecord? record = SelectedRecord;
+        TranslationRecord? record = RecordFromActionSource(sender);
         if (record is null || MessageBox.Show(this, "确定删除这条翻译记录吗？", "删除记录",
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
         {
@@ -240,23 +215,6 @@ public partial class MainWindow : Window
         {
             Logger.Error("历史窗口", "删除历史记录失败。", exception);
             MessageBox.Show(this, "这条记录没有删除成功，请稍后再试。", "删除失败", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-    }
-
-    private async void ExportButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            string? path = await HistoryCsvExporter.ExportAsync(_repository, this, CancellationToken.None);
-            if (path is not null)
-            {
-                MessageBox.Show(this, "历史记录已导出。", "导出完成", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-        }
-        catch (Exception exception)
-        {
-            Logger.Error("历史窗口", "导出 CSV 失败。", exception);
-            MessageBox.Show(this, "导出失败，请确认保存位置可写后重试。", "导出失败", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -304,7 +262,7 @@ public partial class MainWindow : Window
             CancellationToken token = _loadCancellation?.Token ?? CancellationToken.None;
             bool starredOnly = StarredTabButton.IsChecked == true;
             IReadOnlyList<TranslationRecord> page = await _repository.QueryAsync(
-                SearchBox.Text.Trim(), starredOnly, _records.Count, PageSize, token);
+                string.Empty, starredOnly, _records.Count, PageSize, token);
             foreach (TranslationRecord record in page)
             {
                 _records.Add(record);
@@ -335,12 +293,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        bool searching = SearchBox.Text.Trim().Length > 0;
-        EmptyStateText.Text = searching
-            ? "没有匹配的记录。换个关键词试试。"
-            : starredOnly
-                ? "还没有收藏。翻译出来后点浮窗上的收藏按钮就能存进这里。"
-                : "还没有翻译记录。选中文字后双击 Ctrl 试试。";
+        EmptyStateText.Text = starredOnly
+            ? "还没有收藏。点记录右侧的五角星，就能把它放进这里。"
+            : "还没有翻译记录。选中文字后双击 Ctrl 试试。";
         EmptyStateText.Visibility = Visibility.Visible;
     }
 
@@ -371,13 +326,7 @@ public partial class MainWindow : Window
 
     private TranslationRecord? SelectedRecord => HistoryGrid.SelectedItem as TranslationRecord;
 
-    private static string DisplayModeName(string? modeId) => modeId switch
-    {
-        "auto" => "通用模式",
-        "academic" => "学术科研",
-        "social" => "社交媒体",
-        "business" => "办公邮件",
-        null or "" => "未标注模式",
-        _ => "自定义模式"
-    };
+    /// <summary>列表内的直接操作使用按钮自身的数据项，不依赖“先选中再右键”。</summary>
+    private static TranslationRecord? RecordFromActionSource(object sender) =>
+        (sender as FrameworkElement)?.DataContext as TranslationRecord;
 }
