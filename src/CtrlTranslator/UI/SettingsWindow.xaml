@@ -1,10 +1,12 @@
 <UserControl x:Class="CtrlTranslator.UI.SettingsWindow"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="clr-namespace:CtrlTranslator.UI"
              Background="{DynamicResource Brush.Surface}"
              Loaded="SettingsView_OnLoaded"
              Unloaded="SettingsView_OnUnloaded">
     <UserControl.Resources>
+        <ui:NonEmptyToVisibleConverter x:Key="NonEmptyToVisible" />
         <Style x:Key="Card" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource Brush.SurfaceRaised}" />
             <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
@@ -78,6 +80,10 @@
             <Setter Property="MinHeight" Value="32" />
             <Setter Property="Padding" Value="12,0" />
         </Style>
+        <Style x:Key="RowDangerButton" TargetType="Button" BasedOn="{StaticResource Button.Danger}">
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Padding" Value="12,0" />
+        </Style>
 
         <!-- 开关。仍然是 CheckBox（C# 读的是 IsChecked，不用改一行），只换外观。
              开 / 关除了颜色还有滑块左右位置这一道冗余提示，不靠颜色单独表意。
@@ -139,10 +145,12 @@
         <!-- 整张卡片就是入口：点它进这个模型的详情。当前模型多一道绿色左条，
              左条留出上下 10px，否则会从 10px 圆角里探出来。 -->
         <!-- 不写死宽度：外面用 UniformGrid 等分列，卡片跟着列宽拉伸。
-             以前是 WrapPanel + 固定 216，窗口一拉宽右边就空出小半个卡片的位置。 -->
+             以前是 WrapPanel + 固定 216，窗口一拉宽右边就空出小半个卡片的位置。
+             高 96 不是随手取的：三行字（名称 / 模型名 / 主机名）各占一个 20.3 的行高，
+             加上行间距 8 + 4 和上下内边距 22，正好 95。原来的 88 把主机名那行切掉了一半。 -->
         <Style x:Key="ProfileCard" TargetType="ListBoxItem">
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-            <Setter Property="Height" Value="88" />
+            <Setter Property="Height" Value="96" />
             <Setter Property="Margin" Value="0,0,12,12" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
@@ -181,34 +189,55 @@
             </Setter>
         </Style>
 
-        <!-- 模式卡片。和模型卡片同一个容器样式（ProfileCard），只换里面的内容。 -->
+        <!-- 模式卡片。和模型卡片同一个容器样式（ProfileCard），只换里面的内容。
+             点卡片本身 = 切换成当前模式（负责人 2026-10 决定）：切模式是高频操作，
+             以前要「点卡片进详情 → 再点设为当前」两步。改提示词是低频操作，
+             走右上角的「编辑」。「编辑」常驻不隐藏 —— 藏到悬停才出现，第一次用的人找不到。 -->
         <DataTemplate x:Key="ModeCardTemplate">
             <Grid>
                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Margin="0,0,7,0"
-                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                    <Border x:Name="Badge" Padding="6,1" VerticalAlignment="Center"
-                            CornerRadius="{DynamicResource Radius.Pill}"
-                            Background="{DynamicResource Brush.AccentSubtle}">
-                        <TextBlock x:Name="BadgeLabel" Text="{Binding BadgeText}"
-                                   FontSize="{DynamicResource Size.Caption}" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource Brush.TextSecondary}" />
-                    </Border>
-                </StackPanel>
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Margin="6,-4,-6,0" MinHeight="24" Padding="8,0"
+                            VerticalAlignment="Top" Style="{StaticResource Button.Ghost}"
+                            FontSize="{DynamicResource Size.BodySmall}"
+                            Foreground="{DynamicResource Brush.TextSecondary}"
+                            Content="编辑" ToolTip="编辑这个模式的名称和提示词"
+                            AutomationProperties.Name="{Binding EditAutomationName}"
+                            Click="EditModeButton_OnClick" />
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Margin="0,0,7,0"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        <Border x:Name="Badge" Padding="6,1" VerticalAlignment="Center"
+                                CornerRadius="{DynamicResource Radius.Pill}"
+                                Background="{DynamicResource Brush.AccentSubtle}">
+                            <TextBlock x:Name="BadgeLabel" Text="{Binding BadgeText}"
+                                       FontSize="{DynamicResource Size.Caption}" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource Brush.TextSecondary}" />
+                        </Border>
+                    </StackPanel>
+                </DockPanel>
+                <!-- 深度模板为空会静默套用「通用」：这时说明行换成一句黄字。
+                     以前是一枚「深度未配」徽章，和「当前」抢同一个位置 —— 当前模式没配深度模板时，
+                     「当前」就看不见了；后来分成两枚又挤不下（卡片太窄，后一枚被切成「深度」）。 -->
                 <TextBlock Grid.Row="1" Margin="0,8,0,0" Text="{Binding Summary}" TextWrapping="Wrap"
                            FontSize="{DynamicResource Size.BodySmall}"
-                           Foreground="{DynamicResource Brush.TextTertiary}"
-                           TextTrimming="CharacterEllipsis" />
+                           TextTrimming="CharacterEllipsis">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.TextTertiary}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding DeepMissing}" Value="True">
+                                    <Setter Property="Foreground" Value="{DynamicResource Brush.Warning}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
             </Grid>
             <DataTemplate.Triggers>
                 <DataTrigger Binding="{Binding BadgeKind}" Value="current">
                     <Setter TargetName="Badge" Property="Background" Value="{DynamicResource Brush.SuccessBg}" />
                     <Setter TargetName="BadgeLabel" Property="Foreground" Value="{DynamicResource Brush.Success}" />
-                </DataTrigger>
-                <DataTrigger Binding="{Binding BadgeKind}" Value="deepmissing">
-                    <Setter TargetName="Badge" Property="Background" Value="{DynamicResource Brush.WarningBg}" />
-                    <Setter TargetName="BadgeLabel" Property="Foreground" Value="{DynamicResource Brush.Warning}" />
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
@@ -497,7 +526,7 @@
                             </DockPanel>
                         </Border>
 
-                        <Border Style="{StaticResource Row}">
+                        <Border Style="{StaticResource Row}" BorderThickness="0">
                             <DockPanel>
                                 <ComboBox x:Name="TriggerKeyCombo" DockPanel.Dock="Right" Width="120" HorizontalContentAlignment="Center"
                                           Margin="20,0,0,0" VerticalAlignment="Center"
@@ -512,45 +541,62 @@
                             </DockPanel>
                         </Border>
 
-                        <!-- 三个毫秒参数用同一种控件。原来这项是滑杆、另两项是输入框，
-                             同一组里两种交互方式，读的时候要切换两次心智。 -->
-                        <Border Style="{StaticResource Row}">
-                            <DockPanel>
-                                <TextBox x:Name="DoubleTapIntervalBox" DockPanel.Dock="Right" Width="120"
-                                         Margin="20,0,0,0" VerticalAlignment="Center" TextAlignment="Center"
-                                         Style="{StaticResource RowTextBox}"
-                                         LostKeyboardFocus="TriggerTextBox_OnLostKeyboardFocus" />
-                                <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Style="{StaticResource RowName}" Text="双击间隔" />
-                                    <TextBlock Style="{StaticResource RowHint}" Text="毫秒；150–800。两次按键之间超过这个时间就不算双击，调大更容易触发也更容易误触" />
-                                </StackPanel>
-                            </DockPanel>
-                        </Border>
+                        <!-- 三个毫秒参数收进折叠区：它们决定「多快算双击」「等多久取词」，
+                             大多数人一辈子不用改，摊在第一屏只会让人以为自己必须懂毫秒。
+                             划词不灵时才需要来这里调，折叠头上的说明就是为那一刻写的。
+                             三项用同一种控件（输入框）：原来一项滑杆两项输入框，同一组里两种交互。 -->
+                        <Border Margin="0,10,0,0" Padding="16,4"
+                                BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
+                                CornerRadius="{DynamicResource Radius.Medium}">
+                            <Expander x:Name="TriggerTuningExpander" IsExpanded="False">
+                                <Expander.Header>
+                                    <StackPanel Margin="0,6,0,6">
+                                        <TextBlock FontWeight="Medium" Text="触发灵敏度" />
+                                        <TextBlock Style="{StaticResource RowHint}"
+                                                   Text="双击间隔、按键时长、取词等待。一般不用改，双击没反应或取不到字时再来调" />
+                                    </StackPanel>
+                                </Expander.Header>
+                                <StackPanel Margin="0,4,0,8">
+                                    <Border Style="{StaticResource Row}">
+                                        <DockPanel>
+                                            <TextBox x:Name="DoubleTapIntervalBox" DockPanel.Dock="Right" Width="120"
+                                                     Margin="20,0,0,0" VerticalAlignment="Center" TextAlignment="Center"
+                                                     Style="{StaticResource RowTextBox}"
+                                                     LostKeyboardFocus="TriggerTextBox_OnLostKeyboardFocus" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Style="{StaticResource RowName}" Text="双击间隔" />
+                                                <TextBlock Style="{StaticResource RowHint}" Text="毫秒；150–800。两次按键之间超过这个时间就不算双击，调大更容易触发也更容易误触" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
 
-                        <Border Style="{StaticResource Row}">
-                            <DockPanel>
-                                <TextBox x:Name="MaxKeyHoldBox" DockPanel.Dock="Right" Width="120"
-                                         Margin="20,0,0,0" VerticalAlignment="Center" TextAlignment="Center"
-                                         Style="{StaticResource RowTextBox}"
-                                         LostKeyboardFocus="TriggerTextBox_OnLostKeyboardFocus" />
-                                <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Style="{StaticResource RowName}" Text="单次按键最长时长" />
-                                    <TextBlock Style="{StaticResource RowHint}" Text="毫秒；1–5000。按住不放超过这个时间就不算一次敲击，避免和快捷键冲突" />
-                                </StackPanel>
-                            </DockPanel>
-                        </Border>
+                                    <Border Style="{StaticResource Row}">
+                                        <DockPanel>
+                                            <TextBox x:Name="MaxKeyHoldBox" DockPanel.Dock="Right" Width="120"
+                                                     Margin="20,0,0,0" VerticalAlignment="Center" TextAlignment="Center"
+                                                     Style="{StaticResource RowTextBox}"
+                                                     LostKeyboardFocus="TriggerTextBox_OnLostKeyboardFocus" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Style="{StaticResource RowName}" Text="单次按键最长时长" />
+                                                <TextBlock Style="{StaticResource RowHint}" Text="毫秒；1–5000。按住不放超过这个时间就不算一次敲击，避免和快捷键冲突" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
 
-                        <Border Style="{StaticResource Row}" BorderThickness="0">
-                            <DockPanel>
-                                <TextBox x:Name="ClipboardWaitBox" DockPanel.Dock="Right" Width="120"
-                                         Margin="20,0,0,0" VerticalAlignment="Center" TextAlignment="Center"
-                                         Style="{StaticResource RowTextBox}"
-                                         LostKeyboardFocus="EditableControl_OnLostKeyboardFocus" />
-                                <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Style="{StaticResource RowName}" Text="取词等待时间" />
-                                    <TextBlock Style="{StaticResource RowHint}" Text="毫秒；100–1000。等目标程序把选中文字送进剪贴板的时间，慢的程序可以调大" />
+                                    <Border Style="{StaticResource Row}" BorderThickness="0">
+                                        <DockPanel>
+                                            <TextBox x:Name="ClipboardWaitBox" DockPanel.Dock="Right" Width="120"
+                                                     Margin="20,0,0,0" VerticalAlignment="Center" TextAlignment="Center"
+                                                     Style="{StaticResource RowTextBox}"
+                                                     LostKeyboardFocus="EditableControl_OnLostKeyboardFocus" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Style="{StaticResource RowName}" Text="取词等待时间" />
+                                                <TextBlock Style="{StaticResource RowHint}" Text="毫秒；100–1000。等目标程序把选中文字送进剪贴板的时间，慢的程序可以调大" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
                                 </StackPanel>
-                            </DockPanel>
+                            </Expander>
                         </Border>
 
                         <TextBlock Style="{StaticResource SectionLabel}" Margin="0,32,0,12" Text="翻译浮窗" />
@@ -650,7 +696,7 @@
                             </ListBox>
 
                             <TextBlock Margin="1,6,0,0" Style="{StaticResource Hint}"
-                                       Text="点卡片编辑它的接口地址、API Key 和模型；拖动卡片可以调整顺序 —— 这个顺序就是划词失败时的回退顺序。键盘：选中卡片后 Enter 打开、Alt+← / Alt+→ 调整顺序。" />
+                                       Text="点卡片修改连接信息。拖动卡片调整先后：当前模型出错时，按这个顺序依次改用备用模型（键盘：Alt + ← / →）。" />
                         </StackPanel>
 
                         <!-- 视图二：单个模型 -->
@@ -677,8 +723,20 @@
                                             MinHeight="32" Padding="18,0" Visibility="Collapsed"
                                             Content="添加模型" Click="AddDraftButton_OnClick" />
                                 </StackPanel>
-                                <TextBlock x:Name="ProfileDetailTitle" Style="{StaticResource PageTitle}"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                <!-- 当前模型的详情页不再显示「设为当前」，改用标题后面这枚徽章说明它就是当前。
+                                     内层 DockPanel 让标题先占位、徽章紧跟其后；标题过长时照样能截断。 -->
+                                <DockPanel LastChildFill="False">
+                                    <TextBlock x:Name="ProfileDetailTitle" DockPanel.Dock="Left"
+                                               Style="{StaticResource PageTitle}"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    <Border x:Name="ProfileCurrentBadge" DockPanel.Dock="Left" Margin="10,2,0,0"
+                                            Padding="7,1" VerticalAlignment="Center" Visibility="Collapsed"
+                                            CornerRadius="{DynamicResource Radius.Pill}"
+                                            Background="{DynamicResource Brush.SuccessBg}">
+                                        <TextBlock Text="当前使用" FontSize="{DynamicResource Size.Caption}" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource Brush.Success}" />
+                                    </Border>
+                                </DockPanel>
                             </DockPanel>
 
                             <TextBlock x:Name="DraftHintText" Visibility="Collapsed"
@@ -956,7 +1014,7 @@
                             </ListBox>
 
                             <TextBlock Margin="1,6,0,0" Style="{StaticResource Hint}"
-                                       Text="点卡片编辑它的提示词。模式决定译文的语气和取舍，不影响译成什么语言。" />
+                                       Text="模式只管译文的语气和取舍，不影响译成什么语言。要改提示词，点卡片右上角的「编辑」。" />
 
 
                         <TextBlock Style="{StaticResource SectionLabel}" Margin="0,32,0,12" Text="语言方向" />
@@ -994,7 +1052,7 @@
                                 <Path Grid.Row="1" Grid.Column="1" Width="20" Height="20"
                                       HorizontalAlignment="Center" VerticalAlignment="Center"
                                       Stretch="Uniform" Data="{DynamicResource Icon.Swap}"
-                                      Stroke="{DynamicResource Brush.AccentSecondary}" StrokeThickness="1.5"
+                                      Stroke="{DynamicResource Brush.TextTertiary}" StrokeThickness="1.5"
                                       StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                       StrokeLineJoin="Round" />
 
@@ -1014,7 +1072,12 @@
                         <TextBlock Margin="1,10,0,0" Style="{StaticResource RowHint}"
                                    Text="方向按选中的文字自动判断，不用手动切换：划到英文出中文，划到中文出英文。" />
 
-                        <Border Style="{StaticResource Row}" BorderThickness="0">
+                        <!-- 词典阈值和长文本阈值是一对：都在回答「选中多少字时该怎么处理」。
+                             原来词典阈值没有分组标题、挂在语言方向的说明下面；长文本阈值又被塞进「隐私」——
+                             它防的是误翻一大段耗掉额度，跟隐私没有关系。 -->
+                        <TextBlock Style="{StaticResource SectionLabel}" Margin="0,32,0,4" Text="短词与长文" />
+
+                        <Border Style="{StaticResource Row}">
                             <DockPanel>
                                 <TextBox x:Name="WordThresholdBox" DockPanel.Dock="Right" Width="120"
                                          Margin="20,0,0,0" VerticalAlignment="Center" TextAlignment="Center"
@@ -1027,9 +1090,7 @@
                             </DockPanel>
                         </Border>
 
-                        <TextBlock Style="{StaticResource SectionLabel}" Margin="0,32,0,12" Text="隐私" />
-
-                        <Border Style="{StaticResource Row}">
+                        <Border Style="{StaticResource Row}" BorderThickness="0">
                             <DockPanel>
                                 <TextBox x:Name="LongTextThresholdBox" DockPanel.Dock="Right" Width="120"
                                          Margin="20,0,0,0" VerticalAlignment="Center" TextAlignment="Center"
@@ -1041,6 +1102,9 @@
                                 </StackPanel>
                             </DockPanel>
                         </Border>
+
+
+                        <TextBlock Style="{StaticResource SectionLabel}" Margin="0,32,0,12" Text="隐私" />
 
                         <Border Style="{StaticResource Row}">
                             <DockPanel>
@@ -1097,7 +1161,7 @@
                             <TextBox x:Name="ModePromptBox" MinHeight="188" Padding="12,10"
                                      AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap"
                                      VerticalScrollBarVisibility="Auto"
-                                     FontFamily="{DynamicResource Font.Mono}"
+                                     FontFamily="{DynamicResource Font.Ui}"
                                      FontSize="{DynamicResource Size.Body}"
                                      Background="{DynamicResource Brush.Surface}"
                                      LostKeyboardFocus="ModePromptBox_OnLostKeyboardFocus" />
@@ -1109,7 +1173,7 @@
                             <TextBox x:Name="ModeDeepPromptBox" MinHeight="188" Padding="12,10"
                                      AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap"
                                      VerticalScrollBarVisibility="Auto"
-                                     FontFamily="{DynamicResource Font.Mono}"
+                                     FontFamily="{DynamicResource Font.Ui}"
                                      FontSize="{DynamicResource Size.Body}"
                                      Background="{DynamicResource Brush.Surface}"
                                      LostKeyboardFocus="ModeDeepPromptBox_OnLostKeyboardFocus" />
@@ -1171,6 +1235,12 @@
                                                Text="CtrlTranslator" />
                                     <TextBlock x:Name="AboutVersionText" Margin="0,3,0,0"
                                                Style="{StaticResource RowHint}" />
+                                    <!-- 检查结果就写在「检查更新」按钮旁边。以前写在下面「自动检查更新」开关的说明里，
+                                         点了按钮要往下找半屏才看到结果，而且那行平时还重复写着一遍版本号。 -->
+                                    <TextBlock x:Name="UpdateStatusText" Margin="0,3,0,0"
+                                               Style="{StaticResource RowHint}"
+                                               Foreground="{DynamicResource Brush.TextSecondary}"
+                                               Visibility="{Binding Text, RelativeSource={RelativeSource Self}, Converter={StaticResource NonEmptyToVisible}}" />
                                 </StackPanel>
                             </DockPanel>
                         </Border>
@@ -1185,7 +1255,8 @@
                                           Click="GeneralCheckBox_OnClick" />
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Style="{StaticResource RowName}" Text="自动检查更新" />
-                                    <TextBlock x:Name="UpdateStatusText" Style="{StaticResource RowHint}" />
+                                    <TextBlock Style="{StaticResource RowHint}"
+                                               Text="启动时和之后每天查一次。有新版本会先问你，不会自己装；安装包校验不通过一律不装" />
                                 </StackPanel>
                             </DockPanel>
                         </Border>
@@ -1265,11 +1336,11 @@
                         <Border Style="{StaticResource Row}">
                             <DockPanel>
                                 <Button DockPanel.Dock="Right" Width="88" Margin="20,0,0,0"
-                                        VerticalAlignment="Center" Style="{StaticResource RowButton}"
-                                        Content="清空" Click="ClearAllHistoryButton_OnClick" />
+                                        VerticalAlignment="Center" Style="{StaticResource RowDangerButton}"
+                                        Content="清空…" Click="ClearAllHistoryButton_OnClick" />
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Style="{StaticResource RowName}" Text="清空翻译历史" />
-                                    <TextBlock Style="{StaticResource RowHint}" Text="只删未收藏的记录，收藏过的会保留。要删收藏，去翻译历史页逐条操作" />
+                                    <TextBlock Style="{StaticResource RowHint}" Text="删除所有没收藏的记录，删了找不回来。收藏的会保留；要删收藏，去翻译历史页逐条删" />
                                 </StackPanel>
                             </DockPanel>
                         </Border>
@@ -1281,7 +1352,7 @@
                                         Content="清空" Click="ClearCacheButton_OnClick" />
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Style="{StaticResource RowName}" Text="清空翻译缓存" />
-                                    <TextBlock Style="{StaticResource RowHint}" Text="缓存只是省重复请求，清掉不会丢任何记录" />
+                                    <TextBlock Style="{StaticResource RowHint}" Text="下次划到翻过的内容会重新请求，不再直接用旧译文。历史记录和收藏一条都不会删" />
                                 </StackPanel>
                             </DockPanel>
                         </Border>

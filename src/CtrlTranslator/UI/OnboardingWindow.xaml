@@ -119,7 +119,7 @@
                             Style="{StaticResource Button.Ghost}"
                             FontSize="{DynamicResource Size.BodySmall}"
                             Foreground="{DynamicResource Brush.AccentSecondary}"
-                            Content="申请 Key" Tag="{Binding KeyUrl}"
+                            Content="{Binding KeyLinkText}" Tag="{Binding KeyUrl}"
                             Visibility="{Binding KeyButtonVisibility}"
                             Click="OpenProviderWebsite_OnClick" />
                     <TextBlock FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
@@ -275,7 +275,7 @@
                     <StackPanel>
                         <TextBlock Style="{StaticResource PageTitle}" Text="选择翻译服务商" />
                         <TextBlock Style="{StaticResource PageCaption}" Margin="0,0,0,8"
-                                   Text="选择你已经拥有 API Key 的服务。以后还能在设置中添加备用服务商。" />
+                                   Text="选一家你已经有 API Key 的服务商。以后还能在设置里再添加别的模型当备用。" />
                     </StackPanel>
                     <ListBox x:Name="ProviderList" Grid.Row="1" Margin="0,10,-10,10"
                              BorderThickness="0" Padding="0"
@@ -302,7 +302,19 @@
                         <TextBlock Style="{StaticResource PageTitle}" Text="填写连接信息" />
                         <TextBlock x:Name="CredentialsProviderText" Style="{StaticResource PageCaption}" />
 
-                        <TextBlock Margin="0,0,0,6" Text="API Key" />
+                        <!-- 「自定义」时服务地址排第一：地址决定了 Key 去哪儿申请、模型名怎么写，
+                             原来排在 Key 和模型后面，用户得先填两项再回头才发现最关键的还空着。
+                             已知服务商的地址是只读展示，仍然放在最后当参考。 -->
+                        <StackPanel x:Name="CustomBaseUrlPanel" Margin="0,0,0,18" Visibility="Collapsed">
+                            <TextBlock Margin="0,0,0,6" Text="服务地址" />
+                            <TextBox x:Name="BaseUrlBox" />
+                            <TextBlock Margin="0,6,0,0" TextWrapping="Wrap"
+                                       FontSize="{DynamicResource Size.BodySmall}"
+                                       Foreground="{DynamicResource Brush.TextTertiary}"
+                                       Text="填写 OpenAI 兼容接口地址，例如 https://api.example.com/v1。" />
+                        </StackPanel>
+
+                        <TextBlock x:Name="ApiKeyLabel" Margin="0,0,0,6" Text="API Key" />
                         <DockPanel>
                             <Button x:Name="ApplyKeyButton" DockPanel.Dock="Right" Margin="10,0,0,0"
                                     Content="去申请 Key" Click="ApplyKeyButton_OnClick" />
@@ -331,15 +343,6 @@
                                            FontSize="{DynamicResource Size.BodySmall}"
                                            Foreground="{DynamicResource Brush.TextSecondary}" />
                             </Border>
-                        </StackPanel>
-
-                        <StackPanel x:Name="CustomBaseUrlPanel" Margin="0,18,0,0" Visibility="Collapsed">
-                            <TextBlock Margin="0,0,0,6" Text="服务地址" />
-                            <TextBox x:Name="BaseUrlBox" />
-                            <TextBlock Margin="0,6,0,0" TextWrapping="Wrap"
-                                       FontSize="{DynamicResource Size.BodySmall}"
-                                       Foreground="{DynamicResource Brush.TextTertiary}"
-                                       Text="填写 OpenAI 兼容接口地址，例如 https://api.example.com/v1。" />
                         </StackPanel>
 
                         <TextBlock x:Name="CredentialsStatusText" Margin="0,16,0,0"
@@ -385,7 +388,7 @@
                         </DockPanel>
                         <TextBlock Margin="38,8,0,0" TextWrapping="Wrap"
                                    Foreground="{DynamicResource Brush.TextSecondary}"
-                                   Text="在任意程序里选中文字，快速双击 Ctrl 试试。以后可在服务商档案中添加备用服务。" />
+                                   Text="在任意程序里选中文字，快速双击 Ctrl 试试。想加备用模型，以后到「应用设置 → 翻译模型」里添加。" />
                     </StackPanel>
                     <StackPanel x:Name="TestFailureActions" Grid.Row="3" Margin="0,16,0,0"
                                 Orientation="Horizontal" Visibility="Collapsed">

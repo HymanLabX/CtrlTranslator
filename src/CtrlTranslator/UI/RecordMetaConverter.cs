@@ -24,7 +24,7 @@ public sealed class RecordMetaConverter : IValueConverter
         StringBuilder builder = new();
         Append(builder, record.Model);
         Append(builder, record.ProfileName);
-        Append(builder, string.IsNullOrWhiteSpace(record.AppName) ? null : $"来自 {record.AppName}");
+        Append(builder, string.IsNullOrWhiteSpace(record.AppName) ? null : $"来自 {FriendlyAppName(record.AppName)}");
         Append(builder, record.LatencyMilliseconds is { } ms ? $"{ms / 1000d:0.0}s" : null);
         return builder.ToString();
     }
@@ -33,6 +33,38 @@ public sealed class RecordMetaConverter : IValueConverter
     {
         throw new NotSupportedException("来源说明只用于显示。");
     }
+
+    /// <summary>
+    /// 记录里存的是进程名（<c>AcroRd32</c>、<c>WINWORD</c>），这是给程序看的；
+    /// 常见的几个换成人认得的名字。认不出的原样显示 —— 进程名至少还能搜得到。
+    /// 只影响这一行显示，数据库和 CSV 里仍是原始进程名。
+    /// </summary>
+    private static readonly Dictionary<string, string> KnownApps = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["AcroRd32"] = "Adobe Acrobat",
+        ["Acrobat"] = "Adobe Acrobat",
+        ["WINWORD"] = "Word",
+        ["EXCEL"] = "Excel",
+        ["POWERPNT"] = "PowerPoint",
+        ["OUTLOOK"] = "Outlook",
+        ["ONENOTE"] = "OneNote",
+        ["chrome"] = "Chrome",
+        ["msedge"] = "Edge",
+        ["firefox"] = "Firefox",
+        ["Code"] = "VS Code",
+        ["explorer"] = "文件资源管理器",
+        ["notepad"] = "记事本",
+        ["WeChat"] = "微信",
+        ["Weixin"] = "微信",
+        ["wps"] = "WPS",
+        ["et"] = "WPS 表格",
+        ["wpp"] = "WPS 演示",
+        ["zotero"] = "Zotero",
+        ["SumatraPDF"] = "SumatraPDF"
+    };
+
+    private static string FriendlyAppName(string processName) =>
+        KnownApps.TryGetValue(processName.Trim(), out string? friendly) ? friendly : processName;
 
     private static void Append(StringBuilder builder, string? part)
     {

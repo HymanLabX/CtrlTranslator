@@ -29,6 +29,61 @@
             </Style.Triggers>
         </Style>
 
+        <!-- 提示条里的按钮：颜色跟着提示条走（黄条黄字、红条红字）。
+             提示条不参与浮窗换肤（深色配色下仍是浅底一小块），按钮要是用普通次要按钮，
+             深色配色下就是浅色条上嵌一块深色按钮。所以底色、描边、悬停全从 Foreground 推出来，
+             Foreground 由代码按提示种类设成 Brush.Warning / Brush.Danger。
+             BorderThickness="0" 就是不带描边的文字按钮（「不再提示」这类次要动作）。 -->
+        <Style x:Key="NoticeButton" TargetType="Button">
+            <Setter Property="MinHeight" Value="26" />
+            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontFamily" Value="{DynamicResource Font.Ui}" />
+            <Setter Property="FontSize" Value="{DynamicResource Size.BodySmall}" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.Warning}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid SnapsToDevicePixels="True">
+                            <Border x:Name="Outline" CornerRadius="{DynamicResource Radius.Small}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    BorderBrush="{TemplateBinding Foreground}" Opacity="0.45" />
+                            <Border x:Name="Fill" CornerRadius="{DynamicResource Radius.Small}"
+                                    Background="{TemplateBinding Foreground}" Opacity="0" />
+                            <!-- 文字颜色必须就近再给一条样式，否则应用级 TextBlock 样式会把它压成近黑（见 Controls.xaml）。 -->
+                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}">
+                                <ContentPresenter.Resources>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                        <Setter Property="Foreground"
+                                                Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                    </Style>
+                                </ContentPresenter.Resources>
+                            </ContentPresenter>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Fill" Property="Opacity" Value="0.08" />
+                                <Setter TargetName="Outline" Property="Opacity" Value="0.8" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Fill" Property="Opacity" Value="0.16" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Outline" Property="Opacity" Value="1" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="PopupIconPath" TargetType="Path">
             <Setter Property="Width" Value="16" />
             <Setter Property="Height" Value="16" />
@@ -101,12 +156,12 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
                 <!-- ⚠️ 内容行必须是 *，不能是 Auto。SizeToContent="Height" 撞上 MaxHeight 之后，
                      Auto 行会按内容的完整高度去要空间，把下面那行操作栏整个顶出可视区
                      （长译文时底部按钮和元信息直接看不见了）。给 * 之后它只拿剩余空间，
                      超出的部分由自己的滚动条消化。 -->
                 <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
@@ -135,41 +190,40 @@
                         ToolTip="关闭" Click="CloseButton_OnClick" />
             </Grid>
 
-            <!-- 提示条。从底部一大块改成顶部一条细的：它原本比要提示的内容还显眼，本末倒置。 -->
-            <Border x:Name="NoticeBorder" Grid.Row="1" Margin="0,10,0,0" Padding="10,7"
+            <!-- 提示条：上面一段话、下面一排按钮。
+                 原来按钮和文字挤在同一行，三个按钮把文字压成四行窄条、按钮又被撑得老高，
+                 读的人得在一堆按钮缝里找字。现在文字整行铺开，按钮排在它下面。
+                 报错也走这一条（红色）：以前是红条里一句「可以尝试下面的修复操作」、
+                 正文里再红一遍真正的原因，同一件事说两次，真正的原因反而离按钮最远。 -->
+            <Border x:Name="NoticeBorder" Grid.Row="1" Margin="0,10,0,0" Padding="10,8,10,9"
                     CornerRadius="{DynamicResource Radius.Small}" Visibility="Collapsed">
-                <DockPanel LastChildFill="True">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="10,0,0,0">
-                        <Button x:Name="DisableThinkingButton" Margin="0,0,4,0" MinHeight="26"
-                                Padding="10,0" Style="{StaticResource Button.Secondary}"
-                                FontSize="{DynamicResource Size.BodySmall}"
+                <StackPanel>
+                    <DockPanel>
+                        <Path x:Name="NoticeIcon" DockPanel.Dock="Left" Width="14" Height="14"
+                              Margin="0,2,8,0" VerticalAlignment="Top" Stretch="Uniform"
+                              StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              StrokeLineJoin="Round" />
+                        <TextBlock x:Name="NoticeText" TextWrapping="Wrap" LineHeight="19"
+                                   FontSize="{DynamicResource Size.BodySmall}" />
+                    </DockPanel>
+                    <!-- 左边距 22 = 图标 14 + 间距 8：按钮和文字左对齐，不和图标对齐。 -->
+                    <WrapPanel x:Name="NoticeActions" Margin="22,8,0,0" Orientation="Horizontal">
+                        <Button x:Name="DisableThinkingButton" Margin="0,0,6,0"
+                                Style="{StaticResource NoticeButton}"
                                 Content="关闭思考模式" Visibility="Collapsed"
                                 Click="DisableThinkingButton_OnClick" />
-                        <Button x:Name="NoticeActionButton" Margin="0,0,4,0" MinHeight="26"
-                                Padding="10,0" Style="{StaticResource Button.Secondary}"
-                                FontSize="{DynamicResource Size.BodySmall}"
+                        <Button x:Name="NoticeActionButton" Margin="0,0,6,0"
+                                Style="{StaticResource NoticeButton}"
                                 Click="NoticeActionButton_OnClick" />
-                        <Button x:Name="NoticeDismissButton" MinHeight="26" Padding="8,0"
-                                Style="{StaticResource Button.Ghost}"
-                                FontSize="{DynamicResource Size.BodySmall}"
+                        <Button x:Name="NoticeDismissButton"
+                                Style="{StaticResource NoticeButton}" BorderThickness="0"
                                 Content="关闭提示" Visibility="Collapsed"
                                 Click="NoticeDismissButton_OnClick" />
-                    </StackPanel>
-                    <Path x:Name="NoticeIcon" DockPanel.Dock="Left" Width="14" Height="14"
-                          Margin="0,1,8,0" VerticalAlignment="Center" Stretch="Uniform"
-                          StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                          StrokeLineJoin="Round" />
-                    <TextBlock x:Name="NoticeText" TextWrapping="Wrap" VerticalAlignment="Center"
-                               FontSize="{DynamicResource Size.BodySmall}" />
-                </DockPanel>
+                    </WrapPanel>
+                </StackPanel>
             </Border>
 
-            <TextBlock x:Name="FallbackNoticeText" Grid.Row="2" Margin="0,8,0,0"
-                       Visibility="Collapsed" TextWrapping="Wrap"
-                       FontSize="{DynamicResource Size.Caption}"
-                       Foreground="{DynamicResource Brush.TextTertiary}" />
-
-            <Grid Grid.Row="3" Margin="0,8,0,0">
+            <Grid Grid.Row="2" Margin="0,8,0,0">
                 <StackPanel x:Name="LoadingPanel" Orientation="Horizontal"
                             HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,4">
                     <Viewbox Width="15" Height="15" Margin="0,0,10,0">
@@ -205,10 +259,18 @@
                                           IsToolBarVisible="False" />
             </Grid>
 
+            <!-- 降级 / 直连说明挪到译文下面：它是「这次是怎么翻出来的」的旁注，
+                 和底部那行「模型 · 耗时」是一类信息。放在译文上面时，
+                 读的人每次都要先跳过一行和译文无关的话。 -->
+            <TextBlock x:Name="FallbackNoticeText" Grid.Row="3" Margin="0,8,0,0"
+                       Visibility="Collapsed" TextWrapping="Wrap"
+                       FontSize="{DynamicResource Size.Caption}"
+                       Foreground="{DynamicResource Brush.TextTertiary}" />
+
             <!-- 底部：对内容的操作 + 这次是谁翻的。
                  朗读 / 收藏 / 复制 从顶部挪下来 —— 它们是对译文的操作，该跟着内容走；
                  顶部只留钉住和关闭这两个真正的窗口控制，第一眼落点才是原文和译文。 -->
-            <Grid Grid.Row="4" Margin="0,8,0,0">
+            <Grid x:Name="ActionRow" Grid.Row="4" Margin="0,8,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
