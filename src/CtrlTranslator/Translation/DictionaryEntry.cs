@@ -7,6 +7,12 @@ public sealed record DictionarySense(string PartOfSpeech, string Definition);
 public sealed record DictionaryExample(string Text, string Translation);
 
 /// <summary>
+/// 反查（用中文词查英文怎么说）时的一个候选说法：<c>elephant /ˈelɪfənt/ n. 大象，最常用的说法</c>。
+/// <see cref="Phonetic"/>、<see cref="PartOfSpeech"/>、<see cref="Note"/> 都可能为空（模型没给）。
+/// </summary>
+public sealed record DictionaryEquivalent(string Word, string Phonetic, string PartOfSpeech, string Note);
+
+/// <summary>
 /// 划词浮窗的词典条目：音标 + 若干义项 + 若干例句。
 /// </summary>
 public sealed class DictionaryEntry
@@ -66,6 +72,178 @@ public static class DictionaryEntryParser
     private static readonly System.Text.RegularExpressions.Regex EnglishPartOfSpeech = new(
         @"^((?:[A-Za-z]{1,5}\.)(?:\s*[/,&]\s*[A-Za-z]{1,5}\.)*)\s*(.*)$",
         System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// 拆反查词条：每行一个说法，格式「说法 /音标/ 词性. 一句说明」（深度翻译 <c>DeepWordStyle.Equivalents</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 同样是尽力而为：音标、词性缺了都照收；整行没有中文、又不长，就当成只有说法本身；
+    /// 夹在中间的纯说明行（模型把说明另起了一行）挂到上一个说法后面。
+    /// 一个说法都认不出来时返回空列表，由调用方整段按普通译文显示。
+    /// <para>
+    /// 还要兜住旧的乱序写法（负责人 2026-10 截图）：先一行音标、再一行中文释义、最后才是英文词。
+    /// 出现在第一个说法之前的音标行和释义行先攒着，挂到后面第一个说法上 ——
+    /// 否则音标会被当成一个"说法"，英文词反倒成了第二个。
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<DictionaryEquivalent> ParseEquivalents(string text)
+    {
+        List<DictionaryEquivalent> items = [];
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return items;
+        }
+
+        string pendingPhonetic = string.Empty;
+        DictionarySense? pendingSense = null;
+        foreach (string raw in text.ReplaceLineEndings("\n").Split('\n'))
+        {
+            string line = StripListMarker(raw);
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            // 单独一行音标：给上一个还没有音标的说法；前面还没有说法就先攒着。
+            if (IsPhonetic(line))
+            {
+                if (items.Count > 0 && items[^1].Phonetic.Length == 0)
+                {
+                    items[^1] = items[^1] with { Phonetic = line };
+                }
+                else if (items.Count == 0)
+                {
+                    pendingPhonetic = line;
+                }
+
+                continue;
+            }
+
+            if (TrySplitEquivalent(line, out DictionaryEquivalent? item))
+            {
+                if (pendingPhonetic.Length > 0 && item.Phonetic.Length == 0)
+                {
+                    item = item with { Phonetic = pendingPhonetic };
+                }
+
+                if (pendingSense is not null && item.PartOfSpeech.Length == 0 && item.Note.Length == 0)
+                {
+                    item = item with { PartOfSpeech = pendingSense.PartOfSpeech, Note = pendingSense.Definition };
+                }
+
+                pendingPhonetic = string.Empty;
+                pendingSense = null;
+                items.Add(item);
+            }
+            else if (line.Any(TextLanguage.IsHan))
+            {
+                if (items.Count > 0)
+                {
+                    DictionaryEquivalent last = items[^1];
+                    items[^1] = last with { Note = last.Note.Length == 0 ? line : $"{last.Note} {line}" };
+                }
+                else
+                {
+                    pendingSense = SplitSense(line);
+                }
+            }
+        }
+
+        return items;
+    }
+
+    /// <summary>音标：一对斜杠或方括号裹着的一段（<c>/ˈelɪfənt/</c>、<c>[ˈelɪfənt]</c>）。</summary>
+    private static readonly System.Text.RegularExpressions.Regex EquivalentWithPhonetic = new(
+        @"^(?<word>[^/\[\]]+?)\s*(?<phonetic>/[^/]+/|\[[^\]]+\])\s*(?<rest>.*)$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>没有音标、但有词性：<c>pachyderm n. 厚皮动物</c>。</summary>
+    private static readonly System.Text.RegularExpressions.Regex EquivalentWithPartOfSpeech = new(
+        @"^(?<word>.+?)\s+(?<pos>[A-Za-z]{1,5}\.(?:\s*[/,&]\s*[A-Za-z]{1,5}\.)*)\s*(?<rest>.*)$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>说法和说明之间用破折号或冒号隔开的写法：<c>elephant —— 大象</c>。</summary>
+    private static readonly string[] EquivalentSeparators = [" —— ", " — ", " - ", "：", ": "];
+
+    private static bool TrySplitEquivalent(string line, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out DictionaryEquivalent? item)
+    {
+        item = null;
+
+        System.Text.RegularExpressions.Match withPhonetic = EquivalentWithPhonetic.Match(line);
+        if (withPhonetic.Success && !withPhonetic.Groups["word"].Value.Any(TextLanguage.IsHan))
+        {
+            (string pos, string note) = SplitPartOfSpeech(withPhonetic.Groups["rest"].Value);
+            item = new DictionaryEquivalent(
+                withPhonetic.Groups["word"].Value.Trim(),
+                withPhonetic.Groups["phonetic"].Value.Trim(),
+                pos,
+                note);
+            return item.Word.Length > 0;
+        }
+
+        System.Text.RegularExpressions.Match withPos = EquivalentWithPartOfSpeech.Match(line);
+        if (withPos.Success && !withPos.Groups["word"].Value.Any(TextLanguage.IsHan))
+        {
+            item = new DictionaryEquivalent(
+                withPos.Groups["word"].Value.Trim(),
+                string.Empty,
+                withPos.Groups["pos"].Value.Trim(),
+                CleanNote(withPos.Groups["rest"].Value));
+            return item.Word.Length > 0;
+        }
+
+        foreach (string separator in EquivalentSeparators)
+        {
+            int index = line.IndexOf(separator, StringComparison.Ordinal);
+            if (index > 0 && !line[..index].Any(TextLanguage.IsHan))
+            {
+                item = new DictionaryEquivalent(line[..index].Trim(), string.Empty, string.Empty, CleanNote(line[(index + separator.Length)..]));
+                return true;
+            }
+        }
+
+        // 整行没有中文、也不长：就是一个说法本身（模型只给了词，没给音标和说明）。
+        if (!line.Any(TextLanguage.IsHan) && line.Length <= 40)
+        {
+            item = new DictionaryEquivalent(line, string.Empty, string.Empty, string.Empty);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static (string PartOfSpeech, string Note) SplitPartOfSpeech(string rest)
+    {
+        string trimmed = rest.Trim();
+        System.Text.RegularExpressions.Match english = EnglishPartOfSpeech.Match(trimmed);
+        if (english.Success && english.Groups[1].Value.Length > 0)
+        {
+            return (english.Groups[1].Value.Trim(), CleanNote(english.Groups[2].Value));
+        }
+
+        return (string.Empty, CleanNote(trimmed));
+    }
+
+    private static string CleanNote(string note) => note.Trim().TrimStart('—', '-', '：', ':', '，', ',', ' ').Trim();
+
+    /// <summary>去掉行首的列表符号、编号和 markdown 加粗：「1. **elephant** …」→「elephant …」。</summary>
+    private static string StripListMarker(string raw)
+    {
+        string line = raw.Replace("**", string.Empty, StringComparison.Ordinal).Trim();
+        line = line.TrimStart('-', '•', '*', '·', '+', ' ', '\t');
+        int digits = 0;
+        while (digits < line.Length && char.IsAsciiDigit(line[digits]))
+        {
+            digits++;
+        }
+
+        if (digits > 0 && digits < line.Length && line[digits] is '.' or ')' or '）' or '、' or '．')
+        {
+            line = line[(digits + 1)..];
+        }
+
+        return line.Trim();
+    }
 
     public static DictionaryEntry Parse(string text)
     {

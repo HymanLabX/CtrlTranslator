@@ -396,7 +396,11 @@
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="CaretBrush" Value="{DynamicResource Brush.Text}" />
-        <Setter Property="SelectionBrush" Value="{DynamicResource Brush.AccentSubtle}" />
+        <!-- 选中文字的底色。WPF 会把它再按 SelectionOpacity 叠一层透明：
+             原来用 AccentSubtle（#ECECEC）× 默认 0.4，叠在 #F7F7F8 的输入框底上几乎看不出来 ——
+             拖选了一段字，用户看不到自己选中了什么。改成近黑 × 0.2，落下来约 #D0D0D0。 -->
+        <Setter Property="SelectionBrush" Value="{DynamicResource Brush.Accent}" />
+        <Setter Property="SelectionOpacity" Value="0.2" />
         <Setter Property="FontFamily" Value="{DynamicResource Font.Ui}" />
         <Setter Property="FontSize" Value="{DynamicResource Size.Body}" />
         <Setter Property="FocusVisualStyle" Value="{x:Null}" />
