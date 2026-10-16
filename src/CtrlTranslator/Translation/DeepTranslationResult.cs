@@ -8,6 +8,14 @@ public sealed record DeepExample(string Text, string Translation);
 /// <summary>深度翻译给出的一条搭配。<see cref="Note"/> 可能为空（模型没写说明）。</summary>
 public sealed record DeepCollocation(string Text, string Note);
 
+/// <summary>三节输出里的一节。顺序就是模型写出来的顺序。</summary>
+public enum DeepSection
+{
+    Translation,
+    Examples,
+    Collocations
+}
+
 /// <summary>
 /// 深度翻译的结构化结果：译文 + 例句 + 搭配三节。
 /// </summary>
@@ -20,6 +28,12 @@ public sealed class DeepTranslationResult
     public IReadOnlyList<DeepExample> Examples { get; init; } = [];
 
     public IReadOnlyList<DeepCollocation> Collocations { get; init; } = [];
+
+    /// <summary>
+    /// 文本里最后出现的那一节。流式显示时用它判断哪些内容已经写完：
+    /// 后面已经开始了别的节，前面的节就写完了；当前这节的最后一条可能还在写。
+    /// </summary>
+    public DeepSection LastSection { get; init; } = DeepSection.Translation;
 
     public bool HasTranslation => Translation.Length > 0;
 
@@ -79,6 +93,7 @@ internal static class DeepResultParser
         // 起始节是「译文」：模型没写标题时，整段输出至少还能当译文显示出来。
         List<string>? currentList = null;
         StringBuilder? currentText = translation;
+        DeepSection lastSection = DeepSection.Translation;
 
         foreach (string line in raw.ReplaceLineEndings("\n").Split('\n'))
         {
@@ -89,14 +104,17 @@ internal static class DeepResultParser
                     case TranslationHeader:
                         currentText = translation;
                         currentList = null;
+                        lastSection = DeepSection.Translation;
                         break;
                     case ExamplesHeader:
                         currentText = null;
                         currentList = exampleLines;
+                        lastSection = DeepSection.Examples;
                         break;
                     case CollocationsHeader:
                         currentText = null;
                         currentList = collocationLines;
+                        lastSection = DeepSection.Collocations;
                         break;
                     default:
                         // 不认识的小节标题：当普通内容处理，别把它后面的文字丢掉。
@@ -119,7 +137,8 @@ internal static class DeepResultParser
         {
             Translation = translation.ToString().Trim(),
             Examples = BuildExamples(exampleLines),
-            Collocations = BuildCollocations(collocationLines)
+            Collocations = BuildCollocations(collocationLines),
+            LastSection = lastSection
         };
     }
 

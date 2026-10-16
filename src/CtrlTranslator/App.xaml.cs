@@ -610,6 +610,40 @@ public partial class App : System.Windows.Application
         }
     }
 
+    /// <summary>
+    /// 深度翻译页出错时的修复按钮。和浮窗的修复按钮（<see cref="Popup_OnActionRequested"/>）同一套去处；
+    /// 「重试」页面自己处理，「关闭思考模式」在这里改成带用户去高级设置里的额外参数框 ——
+    /// 深度翻译不像浮窗那样有一个现成的"关了马上重翻"的流程。
+    /// </summary>
+    private void DeepTranslation_OnActionRequested(object? sender, PopupActionEventArgs e)
+    {
+        try
+        {
+            switch (e.Action)
+            {
+                case ErrorAction.Settings:
+                    ShowSettingsWindow(focusExtraRequestBody: false);
+                    break;
+                case ErrorAction.DisableThinking:
+                    ShowSettingsWindow(focusExtraRequestBody: true);
+                    break;
+                case ErrorAction.Diagnostics:
+                    ShowProfileTest();
+                    break;
+                case ErrorAction.OpenLog:
+                    _trayIcon?.OpenLogDirectory();
+                    break;
+                default:
+                    Logger.Warning("深度翻译", $"出错提示上的操作 {e.Action} 没有对应的处理。");
+                    break;
+            }
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("深度翻译", "执行错误修复操作失败。", exception);
+        }
+    }
+
     private async void Popup_OnStarredChanged(object? sender, StarredChangedEventArgs e)
     {
         try
@@ -1031,7 +1065,8 @@ public partial class App : System.Windows.Application
             CreateDiagnosticRunner,
             _updateService,
             ShowUpdateWindow);
-        var deepTranslationView = new DeepTranslationView(_settings, _translationService);
+        var deepTranslationView = new DeepTranslationView(_settings, _translationService, _speechService);
+        deepTranslationView.ActionRequested += DeepTranslation_OnActionRequested;
         _mainWindow = new MainWindow(
             _settings, _historyRepository, _settingsWindow, deepTranslationView);
         _mainWindow.Closed += MainWindow_OnClosed;

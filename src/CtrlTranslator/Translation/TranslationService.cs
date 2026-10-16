@@ -275,7 +275,13 @@ internal sealed class TranslationService : IDisposable
         Logger.Info(
             "深度翻译",
             $"完成（档案「{profile.Name}」，模式 {prompt.Mode.Id}，译成 {prompt.TargetLanguage}"
-            + $"{(prompt.IsWord ? "，词条" : string.Empty)}）："
+            + prompt.WordStyle switch
+            {
+                DeepWordStyle.Explain => "，查外文词",
+                DeepWordStyle.Equivalents => "，查对应说法",
+                _ => string.Empty
+            }
+            + "）："
             + $"首字 {clientResult.FirstTokenLatencyMilliseconds}ms，"
             + $"总耗时 {clientResult.TotalLatencyMilliseconds}ms。");
 

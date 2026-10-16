@@ -60,7 +60,7 @@ public sealed class AppSettings
     /// 内置模式提示词的版本号。<b>每次改动 <see cref="BuiltInModes"/> 里的提示词文字，必须把这个数字加一。</b>
     /// 提示词会被序列化进 settings.json，光改代码对老用户不生效 —— 靠这个版本号触发覆盖。
     /// </summary>
-    public const int CurrentPromptVersion = 7;
+    public const int CurrentPromptVersion = 8;
 
     /// <summary>
     /// 服务商档案列表。<b>顺序即降级顺序</b>：当前档案失败后按此顺序往下找备用。

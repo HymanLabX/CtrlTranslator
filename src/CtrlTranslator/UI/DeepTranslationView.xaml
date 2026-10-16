@@ -3,7 +3,8 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:ui="clr-namespace:CtrlTranslator.UI"
-             Background="{DynamicResource Brush.Transparent}">
+             Background="{DynamicResource Brush.Transparent}"
+             PreviewKeyDown="DeepTranslationView_OnPreviewKeyDown">
     <UserControl.Resources>
         <ui:NonEmptyToVisibleConverter x:Key="NonEmptyToVisible" />
 
@@ -19,19 +20,156 @@
         <DataTemplate x:Key="LanguageItemTemplate">
             <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
         </DataTemplate>
-        <!-- 例句：第一行是句子本身，第二行是它的中文意思。左边一道竖线把两行框在一起，
-             跟浮窗里词典例句的处理保持一致，用户在两个地方看到的是同一种东西。 -->
+
+        <!-- 能选中、能复制的只读文字。结果区里的译文、例句、搭配都用它：
+             用户精读时经常只想抄其中半句，TextBlock 选不中。
+             ⚠️ 模板里的 PART_ContentHost 必须是 Decorator，不能是 ScrollViewer：
+             TextBox 自带的 ScrollViewer 会把鼠标滚轮吃掉 —— 鼠标停在译文上滚不动外面的结果区。
+             也不沿用全局 TextBox 模板：那份按住鼠标时会把底色换成灰色，拖选文字时整块闪一下。 -->
+        <Style x:Key="SelectableText" TargetType="TextBox">
+            <Setter Property="IsReadOnly" Value="True" />
+            <Setter Property="IsReadOnlyCaretVisible" Value="False" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Background" Value="{DynamicResource Brush.Transparent}" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+            <Setter Property="FontFamily" Value="{DynamicResource Font.Ui}" />
+            <Setter Property="FontSize" Value="{DynamicResource Size.Body}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="SelectionBrush" Value="{DynamicResource Brush.Accent}" />
+            <Setter Property="SelectionOpacity" Value="0.2" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Decorator x:Name="PART_ContentHost" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 条目上的小图标按钮（朗读 / 复制）。28 和历史卡片上的操作按钮同一档。 -->
+        <Style x:Key="ItemIconButton" TargetType="Button" BasedOn="{StaticResource Button.Icon}">
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="2,0,0,0" />
+        </Style>
+        <Style x:Key="ItemIconPath" TargetType="Path">
+            <Setter Property="Width" Value="15" />
+            <Setter Property="Height" Value="15" />
+            <Setter Property="Stretch" Value="Uniform" />
+            <Setter Property="Stroke" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+            <Setter Property="StrokeThickness" Value="1.5" />
+            <Setter Property="StrokeStartLineCap" Value="Round" />
+            <Setter Property="StrokeEndLineCap" Value="Round" />
+            <Setter Property="StrokeLineJoin" Value="Round" />
+        </Style>
+
+        <!-- 例句、搭配上的操作平时压到半透明，鼠标移到这一条上才变实（和历史卡片同一个做法）。
+             不完全藏起来：第一次用的人得知道这里能点。 -->
+        <Style x:Key="ItemActions" TargetType="StackPanel">
+            <Setter Property="Orientation" Value="Horizontal" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="Opacity" Value="0.55" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ContentPresenter}}"
+                             Value="True">
+                    <Setter Property="Opacity" Value="1" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 词条的一个说法（查外文词时只有一个：就是这个词本身；用中文查英文时 1–3 个候选）。
+             说法本身大字加粗、能选中；音标跟在后面；词性加粗打头的释义在下面。
+             只有一个说法时字号再大一档，它就是整页的标题。 -->
+        <DataTemplate x:Key="WordCandidateTemplate">
+            <StackPanel Margin="0,0,0,14">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,-4,0">
+                        <Button Style="{StaticResource ItemIconButton}"
+                                Visibility="{Binding SpeechVisibility}"
+                                ToolTip="{Binding SpeakToolTip}" AutomationProperties.Name="{Binding SpeakToolTip}"
+                                Click="SpeakWord_OnClick">
+                            <Path Style="{StaticResource ItemIconPath}" Data="{DynamicResource Icon.Speaker}" />
+                        </Button>
+                        <Button Style="{StaticResource ItemIconButton}"
+                                Visibility="{Binding CopyVisibility}"
+                                ToolTip="{Binding CopyToolTip}" AutomationProperties.Name="{Binding CopyToolTip}"
+                                Click="CopyWord_OnClick">
+                            <Path Style="{StaticResource ItemIconPath}" Data="{DynamicResource Icon.Copy}" />
+                        </Button>
+                    </StackPanel>
+                    <!-- 词和音标都底对齐：两者字号差很多（22 / 12），居中对齐时小字的音标会浮到词的半腰。 -->
+                    <WrapPanel VerticalAlignment="Center">
+                        <TextBox Text="{Binding Word, Mode=OneWay}" VerticalAlignment="Bottom" FontWeight="SemiBold"
+                                 AutomationProperties.Name="{Binding Word}">
+                            <TextBox.Style>
+                                <Style TargetType="TextBox" BasedOn="{StaticResource SelectableText}">
+                                    <Setter Property="FontSize" Value="{DynamicResource Size.Title}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsHeadline}" Value="True">
+                                            <Setter Property="FontSize" Value="{DynamicResource Size.Heading}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBox.Style>
+                        </TextBox>
+                        <TextBox Margin="10,0,0,2" VerticalAlignment="Bottom"
+                                 Style="{StaticResource SelectableText}" Text="{Binding Phonetic, Mode=OneWay}"
+                                 FontFamily="{DynamicResource Font.Mono}"
+                                 FontSize="{DynamicResource Size.BodySmall}"
+                                 Foreground="{DynamicResource Brush.TextSecondary}"
+                                 AutomationProperties.Name="音标"
+                                 Visibility="{Binding Phonetic, Converter={StaticResource NonEmptyToVisible}}" />
+                    </WrapPanel>
+                </DockPanel>
+                <ItemsControl Margin="0,6,0,0" ItemsSource="{Binding Senses}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Margin="0,0,0,3" TextWrapping="Wrap"><Run Text="{Binding PartOfSpeech, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" " /><Run Text="{Binding Definition, Mode=OneWay}" /></TextBlock>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- 例句：第一行是句子本身，第二行是它的对照译文。左边一道竖线把两行框在一起，
+             跟浮窗里词典例句的处理保持一致，用户在两个地方看到的是同一种东西。
+             右上角：朗读这句、复制这句（只复制例句本身 —— 写东西时要抄的是它）。
+             朗读按钮显不显示看 ItemsControl 的 Tag（这台电脑有没有可用语音），由代码设。 -->
         <DataTemplate x:Key="ExampleTemplate">
             <Border Margin="0,0,0,14" Padding="12,2,0,2" BorderThickness="2,0,0,0"
                     BorderBrush="{DynamicResource Brush.AccentSecondary}">
-                <StackPanel>
-                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
-                               Foreground="{DynamicResource Brush.Text}" />
-                    <TextBlock Margin="0,4,0,0" Text="{Binding Translation}" TextWrapping="Wrap"
-                               FontSize="{DynamicResource Size.BodySmall}"
-                               Foreground="{DynamicResource Brush.TextSecondary}"
-                               Visibility="{Binding Translation, Converter={StaticResource NonEmptyToVisible}}" />
-                </StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBox Style="{StaticResource SelectableText}" Text="{Binding Text, Mode=OneWay}"
+                                 AutomationProperties.Name="例句" />
+                        <TextBox Margin="0,4,0,0" Style="{StaticResource SelectableText}"
+                                 Text="{Binding Translation, Mode=OneWay}"
+                                 FontSize="{DynamicResource Size.BodySmall}"
+                                 Foreground="{DynamicResource Brush.TextSecondary}"
+                                 AutomationProperties.Name="例句译文"
+                                 Visibility="{Binding Translation, Converter={StaticResource NonEmptyToVisible}}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Margin="10,-4,-4,0" Style="{StaticResource ItemActions}">
+                        <Button Style="{StaticResource ItemIconButton}" ToolTip="朗读这句" AutomationProperties.Name="朗读这句"
+                                Visibility="{Binding Tag, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                Click="SpeakExample_OnClick">
+                            <Path Style="{StaticResource ItemIconPath}" Data="{DynamicResource Icon.Speaker}" />
+                        </Button>
+                        <Button Style="{StaticResource ItemIconButton}" ToolTip="复制这句" AutomationProperties.Name="复制这句"
+                                Click="CopyExample_OnClick">
+                            <Path Style="{StaticResource ItemIconPath}" Data="{DynamicResource Icon.Copy}" />
+                        </Button>
+                    </StackPanel>
+                </Grid>
             </Border>
         </DataTemplate>
 
@@ -40,12 +178,21 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontWeight="SemiBold"
-                           Foreground="{DynamicResource Brush.Text}" />
-                <TextBlock Grid.Column="1" Margin="10,0,0,0" Text="{Binding Note}" TextWrapping="Wrap"
-                           FontSize="{DynamicResource Size.BodySmall}"
-                           Foreground="{DynamicResource Brush.TextSecondary}" />
+                <TextBox Style="{StaticResource SelectableText}" Text="{Binding Text, Mode=OneWay}"
+                         FontWeight="SemiBold" AutomationProperties.Name="搭配" />
+                <TextBox Grid.Column="1" Margin="10,1,0,0" Style="{StaticResource SelectableText}"
+                         Text="{Binding Note, Mode=OneWay}"
+                         FontSize="{DynamicResource Size.BodySmall}"
+                         Foreground="{DynamicResource Brush.TextSecondary}"
+                         AutomationProperties.Name="搭配说明" />
+                <StackPanel Grid.Column="2" Margin="10,-5,-4,0" Style="{StaticResource ItemActions}">
+                    <Button Style="{StaticResource ItemIconButton}" ToolTip="复制这个搭配" AutomationProperties.Name="复制这个搭配"
+                            Click="CopyCollocation_OnClick">
+                        <Path Style="{StaticResource ItemIconPath}" Data="{DynamicResource Icon.Copy}" />
+                    </Button>
+                </StackPanel>
             </Grid>
         </DataTemplate>
     </UserControl.Resources>
@@ -94,10 +241,10 @@
             <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button x:Name="CancelButton" Margin="0,0,10,0" Visibility="Collapsed"
                         Style="{StaticResource Button.Secondary}"
-                        Content="停止" Click="CancelButton_OnClick" />
+                        Content="停止" ToolTip="停止生成（Esc）" Click="CancelButton_OnClick" />
                 <Button x:Name="TranslateButton" MinWidth="104"
                         Style="{StaticResource Button.Primary}"
-                        Content="翻译" Click="TranslateButton_OnClick" />
+                        Content="翻译" ToolTip="开始深度翻译（Ctrl+Enter）" Click="TranslateButton_OnClick" />
             </StackPanel>
         </Grid>
 
@@ -122,6 +269,14 @@
                         <TextBlock x:Name="SourceCountText" DockPanel.Dock="Right" VerticalAlignment="Center"
                                    FontSize="{DynamicResource Size.Caption}"
                                    Foreground="{DynamicResource Brush.TextTertiary}" />
+                        <!-- 有内容才出现。只清输入框，不动右边的结果：清掉原文常常是为了贴下一段，
+                             上一次的结果还想对着看一眼。 -->
+                        <Button x:Name="ClearSourceButton" DockPanel.Dock="Right" Margin="0,0,8,0"
+                                MinHeight="24" Padding="8,0" Visibility="Collapsed"
+                                Style="{StaticResource Button.Ghost}"
+                                FontSize="{DynamicResource Size.BodySmall}"
+                                Foreground="{DynamicResource Brush.TextSecondary}"
+                                Content="清空" ToolTip="清空原文" Click="ClearSourceButton_OnClick" />
                         <TextBlock FontSize="{DynamicResource Size.Subheading}" FontWeight="SemiBold"
                                    VerticalAlignment="Center" Text="原文" />
                     </DockPanel>
@@ -135,6 +290,11 @@
                              VerticalContentAlignment="Top"
                              TextChanged="SourceBox_OnTextChanged"
                              PreviewKeyDown="SourceBox_OnPreviewKeyDown" />
+                    <!-- 空输入框的提示文字。以前是一片空白，第一次来的人不知道这里能放单词还是只能放段落。 -->
+                    <TextBlock x:Name="SourcePlaceholder" Grid.Row="1" Margin="2,12,0,0"
+                               IsHitTestVisible="False" TextWrapping="Wrap"
+                               Foreground="{DynamicResource Brush.TextTertiary}"
+                               Text="粘贴或输入要精读的内容，单词、句子、段落都行。按 Ctrl+Enter 开始翻译。" />
                 </Grid>
             </Border>
 
@@ -185,10 +345,10 @@
                         <TextBlock Margin="0,6,0,0" HorizontalAlignment="Center"
                                    FontSize="{DynamicResource Size.Caption}"
                                    Foreground="{DynamicResource Brush.TextTertiary}"
-                                   Text="比划词慢是正常的，它要多写例句和搭配。" />
+                                   Text="比划词慢是正常的，它要多写例句和搭配。按 Esc 可以停止。" />
                     </StackPanel>
 
-                    <!-- 出错 -->
+                    <!-- 出错：原因 + 能直接点的下一步。以前只有一行红字，用户得自己去找设置在哪儿。 -->
                     <StackPanel x:Name="ErrorState" Visibility="Collapsed" MaxWidth="360"
                                 HorizontalAlignment="Center" VerticalAlignment="Center" Margin="28">
                         <Path Width="22" Height="22" HorizontalAlignment="Center" Stretch="Uniform"
@@ -197,6 +357,12 @@
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
                         <TextBlock x:Name="ErrorText" Margin="0,12,0,0" TextAlignment="Center" TextWrapping="Wrap"
                                    Foreground="{DynamicResource Brush.Danger}" />
+                        <StackPanel Margin="0,16,0,0" Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Button x:Name="RetryButton" MinHeight="32" Padding="16,0"
+                                    Content="重试" Click="RetryButton_OnClick" />
+                            <Button x:Name="ErrorActionButton" Margin="8,0,0,0" MinHeight="32" Padding="16,0"
+                                    Visibility="Collapsed" Click="ErrorActionButton_OnClick" />
+                        </StackPanel>
                     </StackPanel>
 
                     <!-- 结果 -->
@@ -213,16 +379,24 @@
                                           Stroke="{DynamicResource Brush.TextSecondary}" StrokeThickness="1.5"
                                           StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
                                 </Button>
-                                <TextBlock FontSize="{DynamicResource Size.Subheading}" FontWeight="SemiBold"
-                                           VerticalAlignment="Center" Text="译文" />
+                                <!-- 「译文」后面跟着这次的方向（中文 → 英语）。下拉选「自动判断方向」时，
+                                     用户看这里就知道程序替他判断成了哪边。 -->
+                                <TextBlock VerticalAlignment="Center">
+                                    <Run Text="译文" FontSize="{DynamicResource Size.Subheading}" FontWeight="SemiBold" />
+                                    <Run x:Name="DirectionRun" Text="" FontSize="{DynamicResource Size.BodySmall}"
+                                         Foreground="{DynamicResource Brush.TextTertiary}" />
+                                </TextBlock>
                             </DockPanel>
-                            <TextBox x:Name="TranslationBox" Margin="0,10,0,0" IsReadOnly="True"
-                                     AutomationProperties.Name="译文"
-                                     BorderThickness="0" Padding="0"
-                                     Background="{DynamicResource Brush.Transparent}"
-                                     TextWrapping="Wrap" AcceptsReturn="True" />
+                            <!-- 普通译文：比正文大一档，它是这一页的主角。 -->
+                            <TextBox x:Name="TranslationBox" Margin="0,10,0,0"
+                                     Style="{StaticResource SelectableText}"
+                                     FontSize="{DynamicResource Size.Subheading}"
+                                     AutomationProperties.Name="译文" />
+                            <!-- 查词：按词条排版，代替上面的纯文本。 -->
+                            <ItemsControl x:Name="WordCandidatesList" Margin="0,12,0,0" Visibility="Collapsed"
+                                          ItemTemplate="{StaticResource WordCandidateTemplate}" />
 
-                            <StackPanel x:Name="ExamplesSection" Margin="0,26,0,0" Visibility="Collapsed">
+                            <StackPanel x:Name="ExamplesSection" Margin="0,22,0,0" Visibility="Collapsed">
                                 <TextBlock FontSize="{DynamicResource Size.Subheading}" FontWeight="SemiBold"
                                            Text="例句" />
                                 <ItemsControl x:Name="ExamplesList" Margin="0,12,0,0"
