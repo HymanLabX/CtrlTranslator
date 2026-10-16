@@ -9,6 +9,7 @@
     <Window.Resources>
         <ui:SingleLineConverter x:Key="SingleLine" />
         <ui:RecordMetaConverter x:Key="RecordMeta" />
+        <ui:HistoryResultConverter x:Key="HistoryResult" />
 
         <!-- 一级导航项。选中态与设置目录项保持同一套语言：白色抬起 + 绿色左条 + 半粗字重。 -->
         <Style x:Key="SideNavToggle" TargetType="RadioButton">
@@ -152,13 +153,15 @@
             </Style.Triggers>
         </Style>
 
+        <!-- 译文那半边按整条记录转换（不是只拿 ResultText）：词条要拆成释义 / 音标 / 例句分别排，
+             见 HistoryResultConverter。 -->
         <Style x:Key="CardResultText" TargetType="TextBlock" BasedOn="{StaticResource CardText}">
-            <Setter Property="Text" Value="{Binding ResultText, Converter={StaticResource SingleLine}}" />
+            <Setter Property="Text" Value="{Binding Converter={StaticResource HistoryResult}, ConverterParameter=collapsed}" />
             <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
                              Value="True">
-                    <Setter Property="Text" Value="{Binding ResultText}" />
+                    <Setter Property="Text" Value="{Binding Converter={StaticResource HistoryResult}, ConverterParameter=expanded}" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
@@ -316,30 +319,10 @@
                                Text="CtrlTranslator" />
                 </StackPanel>
 
+                <!-- 顺序按使用频率排：翻译历史是打开主窗口时的默认页，排第一；
+                     应用设置是低频入口，沉到侧栏最底下（负责人 2026-10 决定）。
+                     原来是「深度翻译 / 应用设置 / 翻译历史」，默认页反而排在最后。 -->
                 <StackPanel Grid.Row="1">
-                    <RadioButton x:Name="DeepTranslationTabButton" Style="{StaticResource SideNavToggle}"
-                                 GroupName="PrimaryNavigation" Checked="DeepTranslationTab_OnChecked">
-                        <Grid>
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                            <Path Width="16" Height="16" Stretch="Uniform" Data="{DynamicResource Icon.Book}"
-                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
-                                  StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                                  StrokeLineJoin="Round" />
-                            <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="深度翻译"
-                                       Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
-                        </Grid>
-                    </RadioButton>
-                    <RadioButton x:Name="SettingsTabButton" Style="{StaticResource SideNavToggle}"
-                                 GroupName="PrimaryNavigation" Checked="SettingsTab_OnChecked">
-                        <Grid>
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                            <Path Width="16" Height="16" Stretch="Uniform" Data="{DynamicResource Icon.Settings}"
-                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" StrokeThickness="1.5"
-                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
-                            <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="应用设置"
-                                       Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
-                        </Grid>
-                    </RadioButton>
                     <RadioButton x:Name="RecordsTabButton" Style="{StaticResource SideNavToggle}"
                                  GroupName="PrimaryNavigation"
                                  IsChecked="True" Checked="HistoryTab_OnChecked">
@@ -353,7 +336,32 @@
                                        Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
                         </Grid>
                     </RadioButton>
+                    <RadioButton x:Name="DeepTranslationTabButton" Style="{StaticResource SideNavToggle}"
+                                 GroupName="PrimaryNavigation" Checked="DeepTranslationTab_OnChecked">
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <Path Width="16" Height="16" Stretch="Uniform" Data="{DynamicResource Icon.Book}"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                                  StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  StrokeLineJoin="Round" />
+                            <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="深度翻译"
+                                       Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
+                        </Grid>
+                    </RadioButton>
                 </StackPanel>
+
+                <RadioButton x:Name="SettingsTabButton" Grid.Row="2" VerticalAlignment="Bottom"
+                             Margin="0" Style="{StaticResource SideNavToggle}"
+                             GroupName="PrimaryNavigation" Checked="SettingsTab_OnChecked">
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                        <Path Width="16" Height="16" Stretch="Uniform" Data="{DynamicResource Icon.Settings}"
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" StrokeThickness="1.5"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                        <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="应用设置"
+                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
+                    </Grid>
+                </RadioButton>
             </Grid>
         </Border>
 
@@ -371,7 +379,7 @@
                            Text="翻译历史" />
                 <TextBlock Margin="0,4,0,0" TextWrapping="Wrap"
                            Foreground="{DynamicResource Brush.TextSecondary}"
-                           Text="按时间倒序，最近的在最上面。搜索会同时匹配原文和译文；点卡片展开完整内容，再点一次收起。" />
+                           Text="点卡片看完整内容和来源，再点一次收起。" />
             </StackPanel>
 
             <!-- 搜索和筛选压在它们管的那份列表头上。原来摆在整页右上角，
@@ -422,14 +430,49 @@
                  只剩两层边框互相干扰。右侧 10px 内边距是留给滚动条的，
                  否则滚动条会压在卡片圆角上。 -->
             <Grid Grid.Row="2">
+                <!-- 按日期分组（今天 / 昨天 / 10月12日 周日），分组由 MainWindow.xaml.cs 里的
+                     集合视图给。⚠️ 分组后 WPF 默认关掉虚拟化，500 条卡片会一次全建出来 ——
+                     IsVirtualizingWhenGrouping 必须开。按像素滚动：卡片高矮不一，
+                     按条滚动时一格就跳过一整张展开的卡。 -->
                 <ListBox x:Name="HistoryGrid" BorderThickness="0" Padding="0,0,10,0"
                          Background="{DynamicResource Brush.Transparent}"
                          ItemContainerStyle="{StaticResource HistoryCard}"
                          ItemTemplate="{StaticResource HistoryCardTemplate}"
                          HorizontalContentAlignment="Stretch"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         VirtualizingPanel.IsVirtualizing="True"
+                         VirtualizingPanel.IsVirtualizingWhenGrouping="True"
+                         VirtualizingPanel.ScrollUnit="Pixel"
                          PreviewMouseLeftButtonDown="HistoryGrid_OnPreviewMouseLeftButtonDown"
-                         ScrollViewer.ScrollChanged="HistoryGrid_OnScrollChanged" />
+                         ScrollViewer.ScrollChanged="HistoryGrid_OnScrollChanged">
+                    <ListBox.GroupStyle>
+                        <GroupStyle>
+                            <!-- WPF 默认的分组容器会把组内的项缩进 5px，卡片就和上面的搜索框对不齐了。
+                                 换一个不缩进的模板：标题、卡片上下排，左边线和搜索框齐平。 -->
+                            <GroupStyle.ContainerStyle>
+                                <Style TargetType="GroupItem">
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="GroupItem">
+                                                <StackPanel>
+                                                    <ContentPresenter />
+                                                    <ItemsPresenter />
+                                                </StackPanel>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </GroupStyle.ContainerStyle>
+                            <GroupStyle.HeaderTemplate>
+                                <DataTemplate>
+                                    <TextBlock Margin="2,4,0,8" Text="{Binding Name}"
+                                               FontSize="{DynamicResource Size.BodySmall}" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource Brush.TextSecondary}" />
+                                </DataTemplate>
+                            </GroupStyle.HeaderTemplate>
+                        </GroupStyle>
+                    </ListBox.GroupStyle>
+                </ListBox>
                 <TextBlock x:Name="EmptyStateText" Visibility="Collapsed"
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            Margin="28" TextAlignment="Center" TextWrapping="Wrap"

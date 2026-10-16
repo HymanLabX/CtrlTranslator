@@ -100,11 +100,24 @@
                     CornerRadius="{DynamicResource Radius.Small}" Opacity="0" />
             <Border x:Name="PressedLayer" Background="{DynamicResource Brush.Pressed}"
                     CornerRadius="{DynamicResource Radius.Small}" Opacity="0" />
+            <!-- ⚠️ ContentPresenter.Resources 里这条样式不能删。
+                 按钮内容是字符串时，ContentPresenter 会生成一个 TextBlock，而应用级的隐式
+                 TextBlock 样式（本文件开头）会照样套到它身上、把 Foreground 写死成 Brush.Text ——
+                 样式值压过继承值，于是按钮上设的任何文字颜色都不生效：
+                 危险按钮的红字、向导「申请 Key」的绿字、禁用态的灰字，统统变成近黑。
+                 在这里就近再给一条 TextBlock 样式，让文字颜色跟着按钮自己的 Foreground 走。 -->
             <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                               VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
                               Margin="{TemplateBinding Padding}"
                               TextElement.Foreground="{TemplateBinding Foreground}"
-                              RecognizesAccessKey="True" />
+                              RecognizesAccessKey="True">
+                <ContentPresenter.Resources>
+                    <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource {x:Type TextBlock}}">
+                        <Setter Property="Foreground"
+                                Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
+                    </Style>
+                </ContentPresenter.Resources>
+            </ContentPresenter>
         </Grid>
         <ControlTemplate.Triggers>
             <MultiTrigger>
@@ -151,6 +164,84 @@
                 <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.TextTertiary}" />
                 <Setter TargetName="BaseBorder" Property="Background" Value="{DynamicResource Brush.SurfaceSubtle}" />
                 <Setter TargetName="BaseBorder" Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+                <Setter TargetName="HoverLayer" Property="Opacity" Value="0" />
+                <Setter TargetName="PressedLayer" Property="Opacity" Value="0" />
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <!-- 无底色按钮（Ghost / Icon）的模板。和上面那份只差禁用态：
+         有底有框的按钮禁用时换成浅灰底，是在说「这块按不了」；
+         本来就没底色的按钮照搬那套，禁用时反而凭空长出一个灰底方块 ——
+         浮窗加载中的朗读 / 收藏 / 复制就是三个灰方块，比能按的时候还显眼。
+         这里禁用只把整体压到 0.42 透明度，形状不变。 -->
+    <ControlTemplate x:Key="Button.QuietTemplate" TargetType="{x:Type Button}">
+        <Grid x:Name="Root" SnapsToDevicePixels="True">
+            <Border x:Name="BaseBorder"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="{DynamicResource Radius.Small}" />
+            <Border x:Name="HoverLayer" Background="{DynamicResource Brush.Hover}"
+                    CornerRadius="{DynamicResource Radius.Small}" Opacity="0" />
+            <Border x:Name="PressedLayer" Background="{DynamicResource Brush.Pressed}"
+                    CornerRadius="{DynamicResource Radius.Small}" Opacity="0" />
+            <!-- 同上：文字颜色跟着按钮的 Foreground 走，不被应用级 TextBlock 样式盖掉。 -->
+            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                              Margin="{TemplateBinding Padding}"
+                              TextElement.Foreground="{TemplateBinding Foreground}"
+                              RecognizesAccessKey="True">
+                <ContentPresenter.Resources>
+                    <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource {x:Type TextBlock}}">
+                        <Setter Property="Foreground"
+                                Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
+                    </Style>
+                </ContentPresenter.Resources>
+            </ContentPresenter>
+        </Grid>
+        <ControlTemplate.Triggers>
+            <MultiTrigger>
+                <MultiTrigger.Conditions>
+                    <Condition Property="IsEnabled" Value="True" />
+                    <Condition Property="IsMouseOver" Value="True" />
+                </MultiTrigger.Conditions>
+                <MultiTrigger.EnterActions>
+                    <BeginStoryboard>
+                        <Storyboard>
+                            <DoubleAnimation Storyboard.TargetName="HoverLayer"
+                                             Storyboard.TargetProperty="Opacity"
+                                             To="1" Duration="0:0:0.16">
+                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                            </DoubleAnimation>
+                        </Storyboard>
+                    </BeginStoryboard>
+                </MultiTrigger.EnterActions>
+                <MultiTrigger.ExitActions>
+                    <BeginStoryboard>
+                        <Storyboard>
+                            <DoubleAnimation Storyboard.TargetName="HoverLayer"
+                                             Storyboard.TargetProperty="Opacity"
+                                             To="0" Duration="0:0:0.16">
+                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                            </DoubleAnimation>
+                        </Storyboard>
+                    </BeginStoryboard>
+                </MultiTrigger.ExitActions>
+            </MultiTrigger>
+            <MultiTrigger>
+                <MultiTrigger.Conditions>
+                    <Condition Property="IsEnabled" Value="True" />
+                    <Condition Property="IsPressed" Value="True" />
+                </MultiTrigger.Conditions>
+                <Setter TargetName="PressedLayer" Property="Opacity" Value="1" />
+            </MultiTrigger>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="BaseBorder" Property="BorderBrush" Value="{DynamicResource Brush.Accent}" />
+                <Setter TargetName="BaseBorder" Property="BorderThickness" Value="2" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="Root" Property="Opacity" Value="0.42" />
                 <Setter TargetName="HoverLayer" Property="Opacity" Value="0" />
                 <Setter TargetName="PressedLayer" Property="Opacity" Value="0" />
             </Trigger>
@@ -253,6 +344,13 @@
     <Style x:Key="Button.Ghost" TargetType="{x:Type Button}" BasedOn="{StaticResource Button.Secondary}">
         <Setter Property="Background" Value="{DynamicResource Brush.Transparent}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.Transparent}" />
+        <Setter Property="Template" Value="{StaticResource Button.QuietTemplate}" />
+    </Style>
+    <!-- 危险操作（清空历史这类删了就回不来的）：白底红字。
+         不做红底实心 —— 那是「主操作」的分量，而清空从来不该是一页里最想让人点的那个。
+         红字已经足够把它和旁边的「打开」「导出」区分开。 -->
+    <Style x:Key="Button.Danger" TargetType="{x:Type Button}" BasedOn="{StaticResource Button.Secondary}">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Danger}" />
     </Style>
     <Style x:Key="Button.Icon" TargetType="{x:Type Button}" BasedOn="{StaticResource Button.Ghost}">
         <Setter Property="MinHeight" Value="36" />

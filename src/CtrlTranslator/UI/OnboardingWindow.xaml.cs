@@ -78,6 +78,10 @@ public partial class OnboardingWindow : Window
         ApplyKeyButton.Visibility = string.IsNullOrWhiteSpace(preset.KeyUrl)
             ? Visibility.Collapsed
             : Visibility.Visible;
+        // 本机服务（Ollama）没有 Key 可申请，那个链接其实是下载页 —— 按钮和标签都得说实话。
+        bool isLocal = ApiProfile.IsLocalAddress(preset.BaseUrl);
+        ApplyKeyButton.Content = isLocal ? "下载 Ollama" : "去申请 Key";
+        ApiKeyLabel.Text = isLocal ? "API Key（本机服务可以不填）" : "API Key";
 
         CredentialsProviderText.Text = isCustom
             ? "你选的是「自定义」，需要自己填写服务地址。"
@@ -426,6 +430,9 @@ public partial class OnboardingWindow : Window
         public string Description => Preset.Description;
 
         public string KeyUrl => Preset.KeyUrl;
+
+        /// <summary>本机服务的链接是下载页，不是申请 Key 的页面。</summary>
+        public string KeyLinkText => ApiProfile.IsLocalAddress(Preset.BaseUrl) ? "下载" : "申请 Key";
 
         public Visibility KeyButtonVisibility => string.IsNullOrWhiteSpace(Preset.KeyUrl)
             ? Visibility.Collapsed

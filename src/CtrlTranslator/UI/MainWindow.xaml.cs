@@ -1,6 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using CtrlTranslator.Core;
@@ -63,7 +64,14 @@ public partial class MainWindow : Window
         _deepTranslationView = deepTranslationView;
         SettingsHost.Content = settingsView;
         DeepTranslationHost.Content = deepTranslationView;
-        HistoryGrid.ItemsSource = _records;
+        // 按日期分组：今天 / 昨天 / 10月12日 周日。列表本来就按 created_at 倒序，
+        // 分组只是在日期变化的地方插一行小标题，不改变顺序。
+        // 新记录 Insert(0) 时视图会自动归进「今天」组，不用另外处理。
+        var historyView = new ListCollectionView(_records);
+        historyView.GroupDescriptions.Add(new PropertyGroupDescription(
+            nameof(TranslationRecord.CreatedAt),
+            new HistoryDateGroupConverter()));
+        HistoryGrid.ItemsSource = historyView;
         _searchTimer = new DispatcherTimer(
             TimeSpan.FromMilliseconds(220),
             DispatcherPriority.Background,

@@ -257,11 +257,11 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
         RefreshPopupThemes();
         StreamFallbackDelayBox.Text = _settings.StreamFallbackDelayMs.ToString(CultureInfo.CurrentCulture);
 
-        AboutVersionText.Text = $"v{UpdateChecker.CurrentVersion.ToString(3)}";
+        AboutVersionText.Text = $"版本 {UpdateChecker.CurrentVersion.ToString(3)}";
         AutoCheckUpdatesCheckBox.IsChecked = _settings.AutoCheckUpdates;
         UpdateStatusText.Text = _updateService?.PendingRelease is { } pending
             ? $"发现新版本 {pending.Version.ToString(3)}，点「检查更新」可以立即安装。"
-            : $"当前版本 {UpdateChecker.CurrentVersion.ToString(3)}。更新包会先校验 SHA256 再安装，校验不通过一律丢弃。";
+            : string.Empty;
     }
 
     private async void CheckUpdateButton_OnClick(object sender, RoutedEventArgs e)
@@ -278,7 +278,6 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
         try
         {
             UpdateCheckResult result = await _updateService.CheckManuallyAsync(CancellationToken.None);
-            string current = UpdateChecker.CurrentVersion.ToString(3);
             switch (result.Status)
             {
                 case UpdateCheckStatus.UpdateAvailable when result.Release is { } release:
@@ -286,16 +285,15 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
                     _showUpdateWindow(release);
                     break;
                 case UpdateCheckStatus.UpToDate:
-                    UpdateStatusText.Text = $"已经是最新版本 {current}。";
+                    UpdateStatusText.Text = "已经是最新版本。";
                     break;
                 case UpdateCheckStatus.NoRelease:
-                    UpdateStatusText.Text =
-                        $"暂时查不到发布信息：发布页面不存在，或者还没有发布过正式版本。当前版本 {current}。";
+                    UpdateStatusText.Text = "暂时查不到发布信息：发布页面不存在，或者还没有发布过正式版本。";
                     break;
                 default:
                     UpdateStatusText.Text =
                         $"检查更新没有完成：{result.Detail ?? "原因不明"}。"
-                        + "如果你在国内且没开代理，多半是连不上 GitHub。当前版本 " + current + "。";
+                        + "如果你在国内且没开代理，多半是连不上 GitHub。";
                     break;
             }
         }
@@ -543,8 +541,15 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
     {
         bool selected = SelectedProfile is not null;
         DeleteProfileButton.IsEnabled = selected && _settings.Profiles.Count > 1;
-        SetCurrentProfileButton.IsEnabled = selected
-            && !string.Equals(SelectedProfile!.Id, _settings.CurrentProfileId, StringComparison.Ordinal);
+        // 已经是当前的就不显示「设为当前」：以前是一个灰掉的按钮挂在那儿，
+        // 看着像"这个操作暂时不可用"，而不是"它已经是当前了"。
+        bool isCurrentProfile = selected
+            && string.Equals(SelectedProfile!.Id, _settings.CurrentProfileId, StringComparison.Ordinal);
+        SetCurrentProfileButton.IsEnabled = selected && !isCurrentProfile;
+        SetCurrentProfileButton.Visibility = isCurrentProfile ? Visibility.Collapsed : Visibility.Visible;
+        ProfileCurrentBadge.Visibility = isCurrentProfile && _draftProfile is null
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         TestProfileButton.IsEnabled = selected && _testCancellation is null;
         AddDraftButton.IsEnabled = _draftProfile is not null && _draftTestPassed;
     }
@@ -1102,8 +1107,8 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
 
         ModeListItem? current = items.FirstOrDefault(item => item.IsCurrent);
         CurrentModeStatusText.Text = current is null
-            ? "还没有选定当前模式。"
-            : $"当前由「{current.Mode.Name}」决定译文的语气和取舍。";
+            ? "还没有选定当前模式。点一张卡片就切换过去。"
+            : $"正在用「{current.Mode.Name}」。点一张卡片就切换过去。";
 
         LoadModeDetails();
         UpdateModeButtons();
@@ -1185,6 +1190,7 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
         bool isCurrent = SelectedMode is { } mode
             && string.Equals(mode.Id, _settings.CurrentModeId, StringComparison.Ordinal);
         ApplyModeButton.IsEnabled = selected && !isCurrent;
+        ApplyModeButton.Visibility = selected && !isCurrent ? Visibility.Visible : Visibility.Collapsed;
         DeleteModeButton.IsEnabled = selected && !builtIn;
         RestoreModeButton.IsEnabled = builtIn;
         ModeNameBox.IsEnabled = selected;
@@ -1497,18 +1503,43 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
 
     private void ApplyModeButton_OnClick(object sender, RoutedEventArgs e)
     {
+        if (SelectedMode is not { } mode)
+        {
+            ShowValidationError("请先在列表中选择要应用的翻译模式。");
+            return;
+        }
+
+        ApplyMode(mode);
+    }
+
+    /// <summary>切换为当前模式。卡片点击和详情页的「设为当前」共用。</summary>
+    private void ApplyMode(TranslationMode mode)
+    {
         ExecuteUiAction("切换翻译模式", () =>
         {
-            if (SelectedMode is not { } mode)
+            if (string.Equals(mode.Id, _settings.CurrentModeId, StringComparison.Ordinal))
             {
-                ShowValidationError("请先在列表中选择要应用的翻译模式。");
                 return;
             }
 
             _settings.CurrentModeId = mode.Id;
             RefreshModes(mode.Id);
             SaveAll();
+            ShowTemporaryStatus($"已切换到「{mode.Name}」，下次划词生效");
         });
+    }
+
+    /// <summary>卡片右上角的「编辑」：选中这张卡片并进入它的提示词详情。</summary>
+    private void EditModeButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not ModeListItem item)
+        {
+            Logger.Warning("设置", "点了模式卡片上的「编辑」，但没找到对应的模式。");
+            return;
+        }
+
+        ModesList.SelectedItem = item;
+        ShowModeDetail();
     }
 
     private void ModesList_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1518,26 +1549,47 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
         // 和模型卡片一致：跳详情放到"确认是一次点击"的抬起时刻，不在选中时跳。
     }
 
+    /// <summary>
+    /// 记下这次按下是不是落在卡片本身上。落在卡片里的「编辑」按钮上不算 ——
+    /// 否则点「编辑」会在抬起时顺带把这个模式切成当前。
+    /// </summary>
     private void ModesList_OnPreviewMouseLeftButtonDown(
-        object sender, System.Windows.Input.MouseButtonEventArgs e) =>
-        _modeCardPressed = FindAncestor<System.Windows.Controls.ListBoxItem>(
-            e.OriginalSource as DependencyObject)?.DataContext is ModeListItem;
+        object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        var source = e.OriginalSource as DependencyObject;
+        _modeCardPressed = FindAncestor<System.Windows.Controls.Primitives.ButtonBase>(source) is null
+            && FindAncestor<System.Windows.Controls.ListBoxItem>(source)?.DataContext is ModeListItem;
+    }
 
+    /// <summary>
+    /// 点卡片 = 切换成当前模式（负责人 2026-10 决定）。改提示词走卡片右上角的「编辑」。
+    /// 挂在抬起而不是 SelectionChanged 上，理由同模型卡片：ListBox 按下即选中。
+    /// </summary>
     private void ModesList_OnMouseLeftButtonUp(
         object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (_modeCardPressed)
+        if (_modeCardPressed && ModesList.SelectedItem is ModeListItem item)
         {
-            ShowModeDetail();
+            ApplyMode(item.Mode);
         }
 
         _modeCardPressed = false;
     }
 
+    /// <summary>键盘：Enter / 空格切换为当前，F2 进入编辑（和资源管理器里「重命名」同一个键）。</summary>
     private void ModesList_OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        if (ModesList.SelectedItem is ModeListItem
-            && e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Space)
+        if (ModesList.SelectedItem is not ModeListItem item)
+        {
+            return;
+        }
+
+        if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Space)
+        {
+            ApplyMode(item.Mode);
+            e.Handled = true;
+        }
+        else if (e.Key == System.Windows.Input.Key.F2)
         {
             ShowModeDetail();
             e.Handled = true;
@@ -1648,6 +1700,9 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             _settings.CurrentModeId = mode.Id;
             RefreshModes(mode.Id);
             SaveAll();
+            // 新建完直接进编辑页：以前停在卡片网格上，下面这句聚焦的是一个看不见的输入框，
+            // 用户只看到多了一张叫「新建模式」的卡片，不知道下一步该干什么。
+            ShowModeDetail();
             ModeNameBox.Focus();
             ModeNameBox.SelectAll();
         });
@@ -1799,42 +1854,47 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
         }
     }
 
+    /// <summary>
+    /// 清空翻译缓存 = 让已有译文不再被缓存命中，<b>一条记录都不删</b>（负责人 2026-10 决定）。
+    /// </summary>
+    /// <remarks>
+    /// 以前它和「清空翻译历史」干的是同一件事（删掉全部未收藏记录），
+    /// 按钮旁却写着「清掉不会丢任何记录」—— 信了这句话去点的人，历史就没了。
+    /// 现在两个按钮各管一件事：清历史是删数据，清缓存只是「下次重新翻」。
+    /// </remarks>
     private async void ClearCacheButton_OnClick(object sender, RoutedEventArgs e)
     {
         try
         {
-            (int nonStarred, int starred) = await _historyRepository.CountAsync(CancellationToken.None);
-            if (nonStarred == 0)
+            int cached = await _historyRepository.CountCachedAsync(CancellationToken.None);
+            if (cached == 0)
             {
                 System.Windows.MessageBox.Show(
-                    "没有可清除的缓存记录。",
-                    "清空缓存",
+                    "现在没有可清的缓存。",
+                    "清空翻译缓存",
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
                 return;
             }
 
             if (System.Windows.MessageBox.Show(
-                    $"将清除 {nonStarred} 条缓存记录，下次翻译相同内容需要重新请求。收藏的 {starred} 条会保留。",
-                    "清空缓存",
+                    $"清空后，再划到这 {cached} 条翻过的内容会重新请求翻译，不再直接用旧译文。"
+                    + "历史记录和收藏一条都不会删。确定吗？",
+                    "清空翻译缓存",
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Question) != MessageBoxResult.Yes)
             {
                 return;
             }
 
-            await _historyRepository.ClearNonStarredAsync(CancellationToken.None);
-            Logger.Info("数据库", $"用户已清除 {nonStarred} 条缓存，保留收藏 {starred} 条。");
-            System.Windows.MessageBox.Show(
-                $"已清除 {nonStarred} 条缓存，收藏的 {starred} 条已保留。",
-                "清空缓存",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            int cleared = await _historyRepository.InvalidateCacheAsync(CancellationToken.None);
+            Logger.Info("数据库", $"用户已清空翻译缓存，{cleared} 条记录不再被缓存命中，记录本身全部保留。");
+            ShowTemporaryStatus($"已清空 {cleared} 条缓存，历史记录都还在");
         }
         catch (Exception exception)
         {
             Logger.Error("数据库", "清空翻译缓存失败。", exception);
-            System.Windows.MessageBox.Show("缓存没有清空成功，详情已记录到日志。", "清空缓存", MessageBoxButton.OK, MessageBoxImage.Error);
+            System.Windows.MessageBox.Show("缓存没有清空成功，详情已记录到日志。", "清空翻译缓存", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -2105,21 +2165,27 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
     {
         public string Name => Mode.Name;
 
-        /// <summary>内置模式有写好的一句话摘要；自建的没有，退回提示词开头一小段。</summary>
-        public string Summary =>
-            BuiltInModes.SummaryOrNull(Mode.Id)
+        /// <summary>内置模式有写好的一句话摘要；自建的没有，退回提示词开头一小段。
+        /// 深度模板为空时换成提醒（见 <see cref="DeepMissing"/>）。</summary>
+        public string Summary => DeepMissing
+            ? "深度翻译还没配提示词，正沿用「通用」的。点「编辑」补上"
+            : BuiltInModes.SummaryOrNull(Mode.Id)
             ?? (string.IsNullOrWhiteSpace(Mode.SystemPromptTemplate)
                 ? "自建模式，还没写提示词"
                 : Excerpt(Mode.SystemPromptTemplate));
 
-        /// <summary>深度模板为空会静默套用「通用」，这个状态比"当前 / 内置"更该被看见。</summary>
-        public string BadgeKind => string.IsNullOrWhiteSpace(Mode.DeepPromptTemplate)
-            ? "deepmissing"
-            : IsCurrent ? "current" : "normal";
+        /// <summary>
+        /// 主徽章只说「当前 / 内置 / 自建」。点卡片就是切换之后，「哪个是当前」必须永远看得见，
+        /// 所以「深度未配」不再和它抢同一个位置，改成旁边单独一枚黄标。
+        /// </summary>
+        public string BadgeKind => IsCurrent ? "current" : "normal";
 
-        public string BadgeText => string.IsNullOrWhiteSpace(Mode.DeepPromptTemplate)
-            ? "深度未配"
-            : IsCurrent ? "当前" : Mode.IsBuiltIn ? "内置" : "自建";
+        public string BadgeText => IsCurrent ? "当前" : Mode.IsBuiltIn ? "内置" : "自建";
+
+        /// <summary>深度模板为空会静默套用「通用」。卡片说明行会换成一句黄字提醒。</summary>
+        public bool DeepMissing => string.IsNullOrWhiteSpace(Mode.DeepPromptTemplate);
+
+        public string EditAutomationName => $"编辑模式「{Mode.Name}」";
 
         private static string Excerpt(string prompt)
         {

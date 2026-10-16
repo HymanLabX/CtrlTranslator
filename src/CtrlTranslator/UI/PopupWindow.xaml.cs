@@ -49,6 +49,9 @@ public partial class PopupWindow : Window
     private bool _isClosed;
     private int _boundsRefreshQueued;
 
+    /// <summary>顶行当前是词条标题（true）还是原文回显（false）。</summary>
+    private bool _headwordMode;
+
     /// <summary>
     /// 收藏状态的唯一真相。以前是拿 <c>StarButton.Content</c> 的字符串反推的，
     /// 改个图标名就会静默改变逻辑，也没法在存库失败时回滚。
@@ -70,11 +73,17 @@ public partial class PopupWindow : Window
         Width = Math.Clamp(settings.PopupMaxWidth, 260, 900);
         MaxHeight = Math.Clamp(settings.PopupMaxHeight, 180, 900);
         ContentViewer.FontSize = Math.Clamp(settings.PopupFontSize, 10, 24);
-        // 原文回显：换行压成空格，只留一行。这行的作用是"确认翻的是不是我想要的那段"，
-        // 不是让人在这儿读原文。
-        string echoSource = sourceText.ReplaceLineEndings(" ").Trim();
-        SourceEchoText.Text = Ellipsize(echoSource, Width);
-        SourceEchoText.ToolTip = echoSource;
+        // 划的是一个词：顶行从一开始就是这个词的标题，加载中、出结果都不再跳样式。
+        // 划的是句子：顶行是一行灰色小字的原文回显。
+        if (PromptBuilder.IsWord(sourceText, settings.WordThreshold))
+        {
+            ShowHeadword();
+        }
+        else
+        {
+            ShowSourceEcho();
+        }
+
         InitializeSpeechButton();
         if (_speechService is not null)
         {
@@ -174,6 +183,19 @@ public partial class PopupWindow : Window
         _loadingTimer.Stop();
         _stopwatch.Stop();
         SetLoadingState(isLoading: false);
+        // 构造时按原文猜过一次是不是词条；最终以翻译服务的判定为准，两边不一致才换样式。
+        if (result.IsWord != _headwordMode)
+        {
+            if (result.IsWord)
+            {
+                ShowHeadword();
+            }
+            else
+            {
+                ShowSourceEcho();
+            }
+        }
+
         RenderResult(result.ResultText, result.IsWord);
         CopyButton.IsEnabled = true;
         StarButton.IsEnabled = result.RecordId.HasValue;
@@ -209,100 +231,208 @@ public partial class PopupWindow : Window
     }
 
     /// <summary>
-    /// 原文回显的省略方式：<b>掐头留尾</b>，中间打省略号。
+    /// 顶行显示为词条标题：划的是一个词时，这个词本身就是浮窗的标题。
+    /// </summary>
+    /// <remarks>
+    /// 以前词条模式下这个词只出现在顶行那行 12px 灰字里，正文从音标开始 ——
+    /// 查词的人第一眼找的就是这个词，它却是整扇窗里最不起眼的东西。
+    /// 字号跟着「字体大小」预设走（比译文大 3），选了大字的人标题也跟着大。
+    /// </remarks>
+    private void ShowHeadword()
+    {
+        _headwordMode = true;
+        SourceEchoText.Inlines.Clear();
+        SourceEchoText.Text = PromptBuilder.Headword(_sourceText);
+        SourceEchoText.ToolTip = null;
+        SourceEchoText.FontSize = Math.Clamp(_settings.PopupFontSize, 10, 24) + 3;
+        SourceEchoText.FontWeight = FontWeights.SemiBold;
+        SourceEchoText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "Brush.Text");
+    }
+
+    /// <summary>
+    /// 顶行显示为原文回显：一行灰色小字，过长时<b>掐头留尾</b>，中间放一个省略标记。
     /// </summary>
     /// <remarks>
     /// 不用 <c>TextTrimming</c> 那种"截到放不下为止"：那样只能确认这段话从哪儿开始，
     /// 确认不了在哪儿结束。而划词最常见的失手正是<b>多划了半句或少划了结尾</b> ——
     /// 头尾都露出来才看得出选区边界对不对。
     /// <para>
-    /// 中间用「括号 + 一串中点」而不是单个省略号：光一个「…」会被当成原文里本来就有的
-    /// 标点，看不出那儿是被程序截掉的；括起来就一眼是注释不是内容。
-    /// 括号跟着原文走 —— 中文原文用全角、西文原文用半角，免得一段纯英文里
-    /// 突然冒出一个全角括号，看着像原文里本来就有。
+    /// 宽度按<b>实际排版量出来</b>，不再按"字数 ≈ 宽度 ÷ 字号"估：
+    /// 那个估法对西文偏保守一倍多，480 宽的浮窗只给 30 个字符，
+    /// 一句英文被切成 <c>The simula (··· ···) hroughout.</c>，头尾都认不出来。
     /// </para>
     /// <para>
-    /// 字数按浮窗实际宽度折算：中文一个字约等于一个字号宽，除以字号偏保守，
-    /// 拉丁文会富余一些，宁可短一点也不要触发 XAML 那层兜底的尾部截断 ——
-    /// 那会把刚留出来的尾巴又切掉。
+    /// 省略标记是一颗灰底小胶囊，不是文字：原文里本来就可能有「…」或括号，
+    /// 写成文字就分不清哪个是原文、哪个是程序截掉的。胶囊一眼就不是内容。
     /// </para>
     /// </remarks>
-    private static string Ellipsize(string text, double popupWidth)
+    private void ShowSourceEcho()
     {
-        const double SourceFontSize = 12;
-        // 中间那截标记要占位，先从预算里扣掉，否则加上它就超宽了。
-        const int MarkerBudget = 10;
-
-        int budget = (int)Math.Clamp((popupWidth - 110) / SourceFontSize, 12, 60);
-        if (text.Length <= budget)
+        _headwordMode = false;
+        SourceEchoText.Inlines.Clear();
+        SourceEchoText.SetResourceReference(System.Windows.Controls.TextBlock.FontSizeProperty, "Size.BodySmall");
+        SourceEchoText.FontWeight = FontWeights.Normal;
+        SourceEchoText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "Brush.TextTertiary");
+        string echo = CollapseWhitespace(_sourceText);
+        SourceEchoText.ToolTip = echo.Length > 0 ? echo : null;
+        if (echo.Length == 0)
         {
-            return text;
+            return;
         }
 
-        int available = budget - MarkerBudget;
-        if (available < 8)
+        double available = Width - EchoReservedWidth;
+        var typeface = new Typeface(
+            SourceEchoText.FontFamily,
+            SourceEchoText.FontStyle,
+            SourceEchoText.FontWeight,
+            SourceEchoText.FontStretch);
+        double fontSize = SourceEchoText.FontSize;
+        double Measure(string text) => new FormattedText(
+            text,
+            System.Globalization.CultureInfo.CurrentUICulture,
+            System.Windows.FlowDirection.LeftToRight,
+            typeface,
+            fontSize,
+            System.Windows.Media.Brushes.Black,
+            1.0).WidthIncludingTrailingWhitespace;
+
+        double room = available - EchoGapWidth;
+        if (Measure(echo) <= available || room < 80)
         {
-            // 窄到连"头 + 标记 + 尾"都排不下，退回只留开头。
-            return TakeHead(text, Math.Max(1, budget - 1)) + "…";
+            // 放得下，或者窄到连"头 + 标记 + 尾"都排不开：整句交给 TextTrimming 兜底。
+            SourceEchoText.Inlines.Add(new Run(echo));
+            return;
         }
 
-        string marker = IsMostlyCjk(text) ? "（··· ···）" : " (··· ···) ";
-        return TakeHead(text, available / 2) + marker + TakeTail(text, available - available / 2);
+        // 开头多给一点：开头比结尾更能认出"这是哪一段"。
+        int headLength = FitPrefix(echo, room * 0.55, Measure);
+        string head = TrimHeadToWord(echo, headLength);
+        int tailLength = FitSuffix(echo, room - Measure(head), Measure);
+        string tail = TrimTailToWord(echo, tailLength);
+
+        SourceEchoText.Inlines.Add(new Run(head));
+        SourceEchoText.Inlines.Add(CreateEchoGap());
+        SourceEchoText.Inlines.Add(new Run(tail));
+    }
+
+    /// <summary>顶行右侧钉住、关闭两个按钮，外壳内边距和边框占掉的宽度。</summary>
+    private const double EchoReservedWidth = 96;
+
+    /// <summary>省略胶囊连同两侧间距的宽度。</summary>
+    private const double EchoGapWidth = 34;
+
+    private static string CollapseWhitespace(string text) =>
+        System.Text.RegularExpressions.Regex.Replace(text.ReplaceLineEndings(" "), @"\s+", " ").Trim();
+
+    private static InlineUIContainer CreateEchoGap()
+    {
+        var label = new System.Windows.Controls.TextBlock
+        {
+            Text = "···",
+            FontSize = 10,
+            LineHeight = 12,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        label.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "Brush.TextSecondary");
+        var chip = new System.Windows.Controls.Border
+        {
+            Child = label,
+            Padding = new Thickness(5, 0, 5, 1),
+            Margin = new Thickness(5, 0, 5, 0),
+            CornerRadius = new CornerRadius(4),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        chip.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Brush.Pressed");
+        return new InlineUIContainer(chip) { BaselineAlignment = BaselineAlignment.Center };
+    }
+
+    /// <summary>从头开始，量得下的最长前缀有几个字符（二分，不把代理对劈开）。</summary>
+    private static int FitPrefix(string text, double budget, Func<string, double> measure)
+    {
+        int low = 0;
+        int high = text.Length;
+        while (low < high)
+        {
+            int middle = (low + high + 1) / 2;
+            if (measure(text[..middle]) <= budget)
+            {
+                low = middle;
+            }
+            else
+            {
+                high = middle - 1;
+            }
+        }
+
+        if (low > 0 && low < text.Length && char.IsHighSurrogate(text[low - 1]))
+        {
+            low--;
+        }
+
+        return low;
+    }
+
+    /// <summary>从尾开始，量得下的最长后缀有几个字符。</summary>
+    private static int FitSuffix(string text, double budget, Func<string, double> measure)
+    {
+        int low = 0;
+        int high = text.Length;
+        while (low < high)
+        {
+            int middle = (low + high + 1) / 2;
+            if (measure(text[^middle..]) <= budget)
+            {
+                low = middle;
+            }
+            else
+            {
+                high = middle - 1;
+            }
+        }
+
+        if (low > 0 && low < text.Length && char.IsLowSurrogate(text[^low]))
+        {
+            low--;
+        }
+
+        return low;
     }
 
     /// <summary>
-    /// 取开头，尽量断在词边界上。
+    /// 开头那截尽量断在词边界上。
     /// </summary>
     /// <remarks>
-    /// 硬按字数切会把单词拦腰截断（<c>simulation</c> 变成 <c>si</c>），
-    /// 那反而看不出选中的是什么。往回退到最近的空格 —— 但退让超过四成就不退了：
-    /// 中文没有空格，硬退会把一半内容砍掉。
+    /// 硬按宽度切会把单词拦腰截断（<c>simulation</c> 变成 <c>simula</c>），
+    /// 那反而看不出选中的是什么。往回退到最近的空格 —— 但退让超过三成就不退了：
+    /// 中文没有空格，硬退会把一大截内容砍掉。
     /// </remarks>
-    private static string TakeHead(string text, int max)
+    private static string TrimHeadToWord(string text, int length)
     {
-        if (text.Length <= max)
+        if (length >= text.Length)
         {
             return text;
         }
 
-        string slice = text[..max];
+        string slice = text[..length];
+        bool cutsWord = length > 0 && !char.IsWhiteSpace(text[length]) && !char.IsWhiteSpace(slice[^1]);
         int space = slice.LastIndexOf(' ');
-        return (space >= max * 0.6 ? slice[..space] : slice).TrimEnd();
+        return (cutsWord && space >= length * 0.7 ? slice[..space] : slice).TrimEnd();
     }
 
-    /// <summary>取结尾，同样尽量断在词边界上。</summary>
-    private static string TakeTail(string text, int max)
+    /// <summary>结尾那截同样尽量断在词边界上。</summary>
+    private static string TrimTailToWord(string text, int length)
     {
-        if (text.Length <= max)
+        if (length >= text.Length)
         {
             return text;
         }
 
-        string slice = text[^max..];
+        string slice = text[^length..];
+        bool cutsWord = length > 0
+            && !char.IsWhiteSpace(text[text.Length - length - 1])
+            && !char.IsWhiteSpace(slice[0]);
         int space = slice.IndexOf(' ');
-        return (space >= 0 && space <= max * 0.4 ? slice[(space + 1)..] : slice).TrimStart();
-    }
-
-    /// <summary>原文是不是以中日韩文字为主。决定省略标记用全角括号还是半角。</summary>
-    private static bool IsMostlyCjk(string text)
-    {
-        int meaningful = 0;
-        int cjk = 0;
-        foreach (char character in text)
-        {
-            if (char.IsWhiteSpace(character))
-            {
-                continue;
-            }
-
-            meaningful++;
-            if (character is >= '㐀' and <= '鿿')
-            {
-                cjk++;
-            }
-        }
-
-        return meaningful > 0 && (double)cjk / meaningful > 0.2;
+        return (cutsWord && space >= 0 && space <= length * 0.3 ? slice[(space + 1)..] : slice).TrimStart();
     }
 
     /// <summary>
@@ -329,17 +459,17 @@ public partial class PopupWindow : Window
         _loadingTimer.Stop();
         _stopwatch.Stop();
         SetLoadingState(isLoading: false);
-        RenderErrorText(error.Message);
-        if (error.Action == ErrorAction.None)
-        {
-            NoticeBorder.Visibility = Visibility.Collapsed;
-        }
-        else
-        {
-            ShowNotice("可以尝试下面的修复操作。", error.Action, error.ActionText, isWarning: false);
-        }
-        CopyButton.IsEnabled = false;
-        StarButton.IsEnabled = false;
+
+        // 报错只说一次：原因和修复按钮放在同一块红色提示里。
+        // 以前红条里写「可以尝试下面的修复操作」、真正的原因在正文里再红一遍 ——
+        // 同一件事说两次，而真正的原因离修复按钮最远。
+        ContentViewer.Visibility = Visibility.Collapsed;
+        ShowNotice(error.Message, error.Action, error.ActionText, isWarning: false);
+        NoticeBorder.Margin = new Thickness(0, 8, 0, 0);
+
+        // 出错时底部那行整个收起：收藏、复制没有对象，只剩一个朗读按钮孤零零挂在红条下面，
+        // 看着像少画了东西。要听原文的人等翻译成功了再听。
+        ActionRow.Visibility = Visibility.Collapsed;
         RepositionAndRefreshBounds();
     }
 
@@ -374,6 +504,12 @@ public partial class PopupWindow : Window
 
     private void OnSizeChanged(object sender, SizeChangedEventArgs e)
     {
+        // 用户拖宽 / 拖窄浮窗后，回显的头尾要按新宽度重新截，否则窄了尾巴被切、宽了留一截空。
+        if (e.WidthChanged && !_headwordMode && e.PreviousSize.Width > 0)
+        {
+            ShowSourceEcho();
+        }
+
         SchedulePhysicalBoundsRefresh();
     }
 
@@ -596,7 +732,9 @@ public partial class PopupWindow : Window
         ContentViewer.Visibility = isLoading ? Visibility.Collapsed : Visibility.Visible;
         // 朗读的是原文，翻译还没回来时原文也已经拿到了；但按 §4.4 的规定，
         // 加载期间工具条统一置灰，加载结束后再按语音是否可用决定。
-        SpeechButton.IsEnabled = !isLoading && _speechService?.IsAvailable == true;
+        SpeechButton.IsEnabled = !isLoading
+            && _speechService?.IsAvailable == true
+            && !string.IsNullOrWhiteSpace(_sourceText);
         StarButton.IsEnabled = !isLoading && _result?.RecordId is not null;
         CopyButton.IsEnabled = !isLoading && _result is not null;
     }
@@ -767,31 +905,6 @@ public partial class PopupWindow : Window
         ContentViewer.Document = document;
     }
 
-    private void RenderErrorText(string message)
-    {
-        var document = CreateDocument();
-        var icon = new System.Windows.Shapes.Path
-        {
-            Width = 14,
-            Height = 14,
-            Stretch = Stretch.Uniform,
-            StrokeThickness = 1.5,
-            StrokeStartLineCap = PenLineCap.Round,
-            StrokeEndLineCap = PenLineCap.Round,
-            StrokeLineJoin = PenLineJoin.Round,
-            Margin = new Thickness(0, 0, 6, -2)
-        };
-        icon.SetResourceReference(System.Windows.Shapes.Path.DataProperty, "Icon.Error");
-        icon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "Brush.Danger");
-
-        var paragraph = new Paragraph { Margin = new Thickness(0) };
-        paragraph.SetResourceReference(TextElement.ForegroundProperty, "Brush.Danger");
-        paragraph.Inlines.Add(new InlineUIContainer(icon) { BaselineAlignment = BaselineAlignment.Center });
-        paragraph.Inlines.Add(new Run(message));
-        document.Blocks.Add(paragraph);
-        ContentViewer.Document = document;
-    }
-
     private FlowDocument CreateDocument()
     {
         double fontSize = Math.Clamp(_settings.PopupFontSize, 10, 24);
@@ -838,7 +951,7 @@ public partial class PopupWindow : Window
     private void ShowReasoningWarning(string model)
     {
         ShowNotice(
-            $"你配置的模型「{model}」正在“思考”，这会让翻译慢很多、也更费钱。",
+            $"模型「{model}」开着“思考”，翻译会慢很多、也更费钱。",
             ErrorAction.Settings,
             "去设置",
             isWarning: true);
@@ -847,6 +960,7 @@ public partial class PopupWindow : Window
         DisableThinkingButton.Visibility = Visibility.Visible;
         NoticeDismissButton.Visibility = Visibility.Visible;
         NoticeDismissButton.Content = "不再提示";
+        UpdateNoticeActionsVisibility();
     }
 
     private void ShowNotice(string message, ErrorAction action, string? actionText, bool isWarning)
@@ -865,17 +979,31 @@ public partial class PopupWindow : Window
         NoticeIcon.SetResourceReference(
             System.Windows.Shapes.Shape.StrokeProperty,
             isWarning ? "Brush.Warning" : "Brush.Danger");
-        NoticeActionButton.Content = actionText;
-        NoticeActionButton.Visibility = action == ErrorAction.None
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-        if (!isWarning)
+        foreach (System.Windows.Controls.Button button in new[] { DisableThinkingButton, NoticeActionButton, NoticeDismissButton })
         {
-            DisableThinkingButton.Visibility = Visibility.Collapsed;
-            NoticeDismissButton.Visibility = Visibility.Collapsed;
+            button.SetResourceReference(ForegroundProperty, isWarning ? "Brush.Warning" : "Brush.Danger");
         }
 
+        NoticeActionButton.Content = actionText;
+        NoticeActionButton.Visibility = action == ErrorAction.None || string.IsNullOrWhiteSpace(actionText)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        // 每条提示自带自己的按钮组合：先收起只属于「思考模式提醒」的两个，
+        // 需要的话由 ShowReasoningWarning 在这之后再打开。
+        DisableThinkingButton.Visibility = Visibility.Collapsed;
+        NoticeDismissButton.Visibility = Visibility.Collapsed;
+        UpdateNoticeActionsVisibility();
+
         NoticeBorder.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>一个按钮都没有时整行收起，否则提示条下面会空出一截。</summary>
+    private void UpdateNoticeActionsVisibility()
+    {
+        bool any = DisableThinkingButton.Visibility == Visibility.Visible
+            || NoticeActionButton.Visibility == Visibility.Visible
+            || NoticeDismissButton.Visibility == Visibility.Visible;
+        NoticeActions.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void RepositionAndRefreshBounds()

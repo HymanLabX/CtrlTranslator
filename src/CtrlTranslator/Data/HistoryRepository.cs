@@ -275,6 +275,45 @@ public sealed class HistoryRepository
         }
     }
 
+    /// <summary>
+    /// 还能被缓存命中的记录有几条。清空缓存前报给用户。
+    /// </summary>
+    /// <remarks>
+    /// 能命中的 key 是纯十六进制哈希；带 <c>#</c> 的都已经不会命中了
+    /// （<c>#incomplete</c> 是被截断的译文，<c>#cleared</c> 是清过缓存的），不算在内。
+    /// </remarks>
+    public async Task<int> CountCachedAsync(CancellationToken cancellationToken)
+    {
+        await using SqliteConnection connection = _database.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM translations WHERE instr(cache_key, '#') = 0;";
+        object? value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is long count ? (int)count : 0;
+    }
+
+    /// <summary>
+    /// 清空翻译缓存：让现有记录全部不再被缓存命中，<b>一条都不删</b>（负责人 2026-10 决定）。
+    /// </summary>
+    /// <remarks>
+    /// 做法是给 cache_key 加后缀 <c>#cleared</c>，和 <c>#incomplete</c> 同一个思路：
+    /// 查询按 key 全等匹配，加了后缀就再也对不上。不清成空串是为了留着原值好排查问题；
+    /// 只改不带 <c>#</c> 的，反复清也不会把后缀越叠越长。
+    /// <para>
+    /// 以前「清空缓存」和「清空历史」删的是同一批记录，按钮旁却写着「清掉不会丢任何记录」。
+    /// </para>
+    /// </remarks>
+    /// <returns>这次失效的记录条数。</returns>
+    public async Task<int> InvalidateCacheAsync(CancellationToken cancellationToken)
+    {
+        await using SqliteConnection connection = _database.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            "UPDATE translations SET cache_key = cache_key || '#cleared' WHERE instr(cache_key, '#') = 0;";
+        return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private async Task ExecuteDeleteAsync(string commandText, CancellationToken cancellationToken)
     {
         await using SqliteConnection connection = _database.CreateConnection();

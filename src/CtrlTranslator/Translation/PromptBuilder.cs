@@ -144,6 +144,28 @@ internal static class PromptBuilder
     }
 
     /// <summary>
+    /// 词条模式下浮窗标题里显示的那个词：剥掉选区顺带进来的首尾标点，
+    /// 单个词末尾的句点也剥（<c>simulation.</c> → <c>simulation</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 词里本来就有句点的（<c>e.g.</c>、<c>U.S.</c>）不剥结尾那个，否则会显示成 <c>e.g</c>。
+    /// </remarks>
+    internal static string Headword(string text)
+    {
+        string core = TrimSurroundingPunctuation(text.ReplaceLineEndings(" "));
+        if (core.Length > 1
+            && core[^1] is '.' or '…'
+            && core.IndexOf('.') == core.Length - 1
+            && !core.Any(char.IsWhiteSpace))
+        {
+            string withoutPeriod = TrimSurroundingPunctuation(core.TrimEnd('.', '…'));
+            return withoutPeriod.Length > 0 ? withoutPeriod : core;
+        }
+
+        return core;
+    }
+
+    /// <summary>
     /// 剥掉首尾的空白、引号、括号和句读（句号、逗号、分号、冒号）—— 这些是选区边界顺带进来的。
     /// </summary>
     /// <remarks>
