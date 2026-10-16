@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
 using CtrlTranslator.Diagnostics;
@@ -40,19 +40,22 @@ public partial class UpdateWindow : Window
 
         if (_installation.Kind == InstallationKind.Portable)
         {
+            VersionMetaText.Text = $"当前 {UpdateChecker.CurrentVersion.ToString(3)} · 免安装版";
             SubtitleText.Text =
-                $"你当前用的是免安装版（{UpdateChecker.CurrentVersion.ToString(3)}），没法就地更新。"
-                + "请到发布页面下载安装包版装一次，之后就能一键更新了。";
+                "免安装版没法就地更新。请到发布页面下载安装包版装一次，之后就能一键更新了。";
             UpdateButton.Content = "去下载";
             return;
         }
 
+        // 版本号和体积是「事实」，点下去会发生什么是「后果」。原来两类挤在同一句里，
+        // 而这扇窗真正需要人读懂的是后果那半句 —— 拆开，事实降到标题下的元信息行。
+        VersionMetaText.Text =
+            $"当前 {UpdateChecker.CurrentVersion.ToString(3)} · 安装包约 {release.SetupSizeMb} MB";
         string elevationNote = _installation.RequiresElevation
             ? "（这份装在 Program Files，更新时 Windows 会弹一次权限确认）"
             : string.Empty;
         SubtitleText.Text =
-            $"当前版本 {UpdateChecker.CurrentVersion.ToString(3)}，安装包约 {release.SetupSizeMb} MB。"
-            + $"点「立即更新」后会自动下载、校验、安装并重启程序{elevationNote}。";
+            $"点「立即更新」后会自动下载、校验、安装并重启程序{elevationNote}。";
     }
 
     private async void UpdateButton_OnClick(object sender, RoutedEventArgs e)

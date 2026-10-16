@@ -8,27 +8,41 @@
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
         <ui:SingleLineConverter x:Key="SingleLine" />
+        <ui:RecordMetaConverter x:Key="RecordMeta" />
 
+        <!-- 一级导航项。选中态与设置目录项保持同一套语言：白色抬起 + 绿色左条 + 半粗字重。 -->
         <Style x:Key="SideNavToggle" TargetType="RadioButton">
-            <Setter Property="MinHeight" Value="46" />
+            <Setter Property="MinHeight" Value="40" />
+            <Setter Property="Margin" Value="0,0,0,4" />
             <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
             <Setter Property="FontSize" Value="{DynamicResource Size.Body}" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
-                        <Border x:Name="Shell" Margin="0,2" Padding="13,10"
+                        <Border x:Name="Shell" MinHeight="40"
                                 Background="{DynamicResource Brush.Transparent}"
                                 BorderBrush="{DynamicResource Brush.Transparent}" BorderThickness="1"
-                                CornerRadius="{DynamicResource Radius.Medium}">
-                            <ContentPresenter VerticalAlignment="Center" />
+                                CornerRadius="{DynamicResource Radius.Small}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="3" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border x:Name="AccentBar" Margin="0,9" CornerRadius="0,2,2,0"
+                                        Background="{DynamicResource Brush.Transparent}" />
+                                <ContentPresenter Grid.Column="1" Margin="9,0,10,0" VerticalAlignment="Center" />
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Shell" Property="Background" Value="{DynamicResource Brush.Hover}" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Shell" Property="Background" Value="{DynamicResource Brush.AccentSubtle}" />
+                                <Setter TargetName="Shell" Property="Background" Value="{DynamicResource Brush.Surface}" />
+                                <Setter TargetName="Shell" Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+                                <Setter TargetName="AccentBar" Property="Background" Value="{DynamicResource Brush.AccentSecondary}" />
                                 <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
                                 <Setter Property="FontWeight" Value="SemiBold" />
                             </Trigger>
@@ -74,32 +88,32 @@
             </Setter>
         </Style>
 
-        <Style x:Key="HistoryItem" TargetType="ListBoxItem">
-            <Setter Property="MinHeight" Value="60" />
+        <!-- 记录卡片。一条翻译记录的基本单位是「原文 + 译文」这一对，所以一张卡两半都给。
+             原来是左列每行只显示原文、右边一整块常驻详情栏伺候一条记录 ——
+             两栏都在为同一条记录服务，却各自只显示一半，右边大部分时间空着。
+             「右边一大片空白」不是留白没调好，是那个结构的必然结果。 -->
+        <Style x:Key="HistoryCard" TargetType="ListBoxItem">
+            <Setter Property="Margin" Value="0,0,0,10" />
+            <Setter Property="Padding" Value="15,13" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="Shell" Background="{DynamicResource Brush.Transparent}"
-                                BorderBrush="{DynamicResource Brush.Border}"
-                                BorderThickness="0,0,0,1">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="3" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Border x:Name="AccentBar" Background="{DynamicResource Brush.Transparent}" />
-                                <ContentPresenter Grid.Column="1" Margin="16,10,10,10" />
-                            </Grid>
+                        <Border x:Name="Shell" Padding="{TemplateBinding Padding}"
+                                Background="{DynamicResource Brush.Surface}"
+                                BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
+                                CornerRadius="{DynamicResource Radius.Medium}">
+                            <ContentPresenter />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Shell" Property="Background" Value="{DynamicResource Brush.Hover}" />
+                                <Setter TargetName="Shell" Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
                             </Trigger>
+                            <!-- 选中即展开。只加重边框、不换底色：卡片本来就是白底，
+                                 铺一层强调色会把正文的对比度压下去。 -->
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Shell" Property="Background" Value="{DynamicResource Brush.AccentSubtle}" />
-                                <Setter TargetName="AccentBar" Property="Background" Value="{DynamicResource Brush.Accent}" />
+                                <Setter TargetName="Shell" Property="BorderBrush" Value="{DynamicResource Brush.Accent}" />
                             </Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True">
                                 <Setter TargetName="Shell" Property="BorderBrush" Value="{DynamicResource Brush.Accent}" />
@@ -110,22 +124,96 @@
             </Setter>
         </Style>
 
-        <DataTemplate x:Key="HistoryItemTemplate">
+        <!-- 折叠时最多两行，选中就放开。
+             41 = 2 × 20.3（Controls.xaml 里 TextBlock 的 LineHeight），不是拍脑袋取的。 -->
+        <Style x:Key="CardText" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="MaxHeight" Value="41" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                             Value="True">
+                    <Setter Property="MaxHeight" Value="Infinity" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- ⚠️ Text 只能由样式给。折叠态要先压成单行，否则原文里的换行会把两行额度先吃光，
+             卡片上只剩半句；展开态又要把换行还回来。而写在标签上的本地值会盖过 DataTrigger，
+             所以两个态都得走 Setter。 -->
+        <Style x:Key="CardSourceText" TargetType="TextBlock" BasedOn="{StaticResource CardText}">
+            <Setter Property="Text" Value="{Binding SourceText, Converter={StaticResource SingleLine}}" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                             Value="True">
+                    <Setter Property="Text" Value="{Binding SourceText}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="CardResultText" TargetType="TextBlock" BasedOn="{StaticResource CardText}">
+            <Setter Property="Text" Value="{Binding ResultText, Converter={StaticResource SingleLine}}" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                             Value="True">
+                    <Setter Property="Text" Value="{Binding ResultText}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 操作平时压到半透明，鼠标移到卡上才变实。不做成完全隐藏：
+             那样第一次用的人根本不知道卡片上有操作。收藏态是实心深色图标，
+             半透明下也认得出来，所以扫一眼仍看得出哪几条收藏了。 -->
+        <Style x:Key="CardActions" TargetType="StackPanel">
+            <Setter Property="Orientation" Value="Horizontal" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="Opacity" Value="0.55" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                             Value="True">
+                    <Setter Property="Opacity" Value="1" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="CardActionButton" TargetType="Button" BasedOn="{StaticResource Button.Icon}">
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="2,0,0,0" />
+        </Style>
+
+        <DataTemplate x:Key="HistoryCardTemplate">
             <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="{Binding SourceText, Converter={StaticResource SingleLine}}"
-                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                           FontSize="{DynamicResource Size.Body}"
-                           Foreground="{DynamicResource Brush.Text}" />
-                <StackPanel Grid.Column="1" Margin="10,0,0,0" Orientation="Horizontal"
-                            HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <Button Width="36" Height="36" Padding="0" Style="{StaticResource Button.Icon}"
+
+                <TextBlock Style="{StaticResource CardSourceText}"
+                           FontSize="{DynamicResource Size.Body}" />
+
+                <!-- 两个复制按钮各自贴着它复制的那半边。位置本身说明了复制的是哪个，
+                     不用去分辨两个长得一样的图标。 -->
+                <StackPanel Grid.Column="1" Margin="12,-3,-4,0" Style="{StaticResource CardActions}">
+                    <Button Style="{StaticResource CardActionButton}"
+                            AutomationProperties.Name="复制原文"
+                            ToolTip="复制原文" Click="CopySource_OnClick">
+                        <Path Width="15" Height="15" Stretch="Uniform" Data="{DynamicResource Icon.Copy}"
+                              Stroke="{DynamicResource Brush.TextSecondary}" StrokeThickness="1.5"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                    </Button>
+                    <Button Style="{StaticResource CardActionButton}"
                             AutomationProperties.Name="切换收藏状态"
                             ToolTip="收藏 / 取消收藏" Click="ToggleStar_OnClick">
-                        <Path Width="16" Height="16" Stretch="Uniform" Data="{DynamicResource Icon.Star}"
+                        <Path Width="15" Height="15" Stretch="Uniform" Data="{DynamicResource Icon.Star}"
                               StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                               StrokeLineJoin="Round">
                             <Path.Style>
@@ -142,31 +230,71 @@
                             </Path.Style>
                         </Path>
                     </Button>
-                    <Button Width="36" Height="36" Padding="0" Margin="4,0,0,0"
-                            Style="{StaticResource Button.Icon}"
+                    <Button Style="{StaticResource CardActionButton}"
                             AutomationProperties.Name="删除这条记录"
                             ToolTip="删除这条记录" Click="DeleteRecord_OnClick">
-                        <Path Width="16" Height="16" Stretch="Uniform" Data="{DynamicResource Icon.Trash}"
+                        <Path Width="15" Height="15" Stretch="Uniform" Data="{DynamicResource Icon.Trash}"
                               Stroke="{DynamicResource Brush.TextSecondary}" StrokeThickness="1.5"
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
                     </Button>
                 </StackPanel>
+
+                <Border Grid.Row="1" Grid.ColumnSpan="2" Margin="0,9,0,0" Padding="0,9,0,0"
+                        BorderBrush="{DynamicResource Brush.BorderSoft}" BorderThickness="0,1,0,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource CardResultText}"
+                                       FontSize="{DynamicResource Size.Body}" />
+                            <!-- 来源说明只跟着展开的那张卡出现：折叠时它是噪音，
+                                 只有真要追「这条是谁翻的」时才有人看。 -->
+                            <TextBlock Margin="0,10,0,0" TextWrapping="Wrap"
+                                       FontSize="{DynamicResource Size.Caption}"
+                                       Foreground="{DynamicResource Brush.TextTertiary}"
+                                       Text="{Binding Converter={StaticResource RecordMeta}}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                                         Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Margin="12,-3,-4,0" Style="{StaticResource CardActions}">
+                            <Button Style="{StaticResource CardActionButton}"
+                                    AutomationProperties.Name="复制译文"
+                                    ToolTip="复制译文" Click="CopyResult_OnClick">
+                                <Path Width="15" Height="15" Stretch="Uniform" Data="{DynamicResource Icon.Copy}"
+                                      Stroke="{DynamicResource Brush.TextSecondary}" StrokeThickness="1.5"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </Border>
             </Grid>
         </DataTemplate>
     </Window.Resources>
 
     <Grid Background="{DynamicResource Brush.SurfaceSubtle}">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="200" />
+            <ColumnDefinition Width="180" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <Border Panel.ZIndex="1" Background="{DynamicResource Brush.Hover}"
+        <!-- 一级导航。原来靠向右的投影去补偿"侧栏和工作区两档灰分不出来"，
+             现在底色本身拉开了层级（NavPrimary → NavSecondary / SurfaceSubtle → Surface），
+             投影就成了多余的镀铬，去掉。 -->
+        <Border Panel.ZIndex="1" Background="{DynamicResource Brush.NavPrimary}"
                 BorderBrush="{DynamicResource Brush.BorderStrong}" BorderThickness="0,0,1,0"
-                Padding="16,22">
-            <Border.Effect>
-                <StaticResource ResourceKey="Effect.SidebarShadow" />
-            </Border.Effect>
+                Padding="10,14">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -174,22 +302,38 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <StackPanel Margin="8,2,8,26" Orientation="Horizontal">
-                    <Image Width="34" Height="34" VerticalAlignment="Center"
+                <!-- 侧栏收窄到 180 后，34px 图标 + 17px 名称会把品牌行挤出边界，
+                     两者各降一档正好落在 160px 的可用宽度里。 -->
+                <!-- 左边距 12 不是随手取的：导航项内容起点 = 3px 选中条 + 9px 间距 = 12，
+                     品牌图标要和下面三个导航图标落在同一条左边线上。 -->
+                <StackPanel Margin="12,0,6,16" Height="40" Orientation="Horizontal">
+                    <Image Width="24" Height="24" VerticalAlignment="Center"
                            Source="pack://application:,,,/Assets/ctrltranslator.ico"
                            AutomationProperties.Name="CtrlTranslator 程序图标" />
-                    <TextBlock Margin="12,0,0,0" VerticalAlignment="Center"
+                    <TextBlock Margin="9,0,0,0" VerticalAlignment="Center"
                                FontFamily="{DynamicResource Font.Display}"
-                               FontSize="{DynamicResource Size.Title}" FontWeight="SemiBold"
+                               FontSize="{DynamicResource Size.BodyLarge}" FontWeight="SemiBold"
                                Text="CtrlTranslator" />
                 </StackPanel>
 
                 <StackPanel Grid.Row="1">
+                    <RadioButton x:Name="DeepTranslationTabButton" Style="{StaticResource SideNavToggle}"
+                                 GroupName="PrimaryNavigation" Checked="DeepTranslationTab_OnChecked">
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <Path Width="16" Height="16" Stretch="Uniform" Data="{DynamicResource Icon.Book}"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                                  StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  StrokeLineJoin="Round" />
+                            <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="深度翻译"
+                                       Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
+                        </Grid>
+                    </RadioButton>
                     <RadioButton x:Name="SettingsTabButton" Style="{StaticResource SideNavToggle}"
                                  GroupName="PrimaryNavigation" Checked="SettingsTab_OnChecked">
                         <Grid>
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="30" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                            <Path Width="17" Height="17" Stretch="Uniform" Data="{DynamicResource Icon.Settings}"
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <Path Width="16" Height="16" Stretch="Uniform" Data="{DynamicResource Icon.Settings}"
                                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" StrokeThickness="1.5"
                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
                             <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="应用设置"
@@ -200,8 +344,8 @@
                                  GroupName="PrimaryNavigation"
                                  IsChecked="True" Checked="HistoryTab_OnChecked">
                         <Grid>
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="30" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                            <Path Width="17" Height="17" Stretch="Uniform" Data="{DynamicResource Icon.History}"
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <Path Width="16" Height="16" Stretch="Uniform" Data="{DynamicResource Icon.History}"
                                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
                                   StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                   StrokeLineJoin="Round" />
@@ -214,125 +358,90 @@
         </Border>
 
         <Grid Grid.Column="1">
-        <Grid x:Name="HistoryContent" Margin="34,28,34,32">
+        <Grid x:Name="HistoryContent" Margin="32,26,32,26">
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <Border Padding="4" Margin="0,0,0,22" HorizontalAlignment="Center"
-                    Background="{DynamicResource Brush.SurfaceRaised}"
-                    BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
-                    CornerRadius="{DynamicResource Radius.Medium}">
-                <StackPanel Orientation="Horizontal">
-                    <RadioButton x:Name="AllTabButton" GroupName="HistoryFilters"
-                                 Style="{StaticResource ContentFilterToggle}"
-                                 IsChecked="True" Checked="HistoryFilter_OnChecked" Content="翻译历史" />
-                    <RadioButton x:Name="StarredTabButton" GroupName="HistoryFilters"
-                                 Style="{StaticResource ContentFilterToggle}"
-                                 Checked="HistoryFilter_OnChecked" Content="我的收藏" />
-                </StackPanel>
-            </Border>
+            <StackPanel Margin="0,0,0,16">
+                <TextBlock FontFamily="{DynamicResource Font.Display}"
+                           FontSize="{DynamicResource Size.Heading}" FontWeight="SemiBold"
+                           Text="翻译历史" />
+                <TextBlock Margin="0,4,0,0" TextWrapping="Wrap"
+                           Foreground="{DynamicResource Brush.TextSecondary}"
+                           Text="按时间倒序，最近的在最上面。搜索会同时匹配原文和译文；点卡片展开完整内容，再点一次收起。" />
+            </StackPanel>
 
-            <Grid Grid.Row="1">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="48*" />
-                    <ColumnDefinition Width="22" />
-                    <ColumnDefinition Width="52*" />
-                </Grid.ColumnDefinitions>
-
-                <Border BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
-                        CornerRadius="{DynamicResource Radius.Large}"
-                        Background="{DynamicResource Brush.Surface}">
+            <!-- 搜索和筛选压在它们管的那份列表头上。原来摆在整页右上角，
+                 离自己作用的东西隔着大半个窗口。搜索框吃掉剩余宽度、筛选靠右固定。 -->
+            <DockPanel Grid.Row="1" Margin="0,0,0,12">
+                <Border DockPanel.Dock="Right" Padding="3" Margin="10,0,0,0"
+                        Background="{DynamicResource Brush.Surface}"
+                        BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
+                        CornerRadius="{DynamicResource Radius.Small}">
+                    <StackPanel Orientation="Horizontal">
+                        <RadioButton x:Name="AllTabButton" GroupName="HistoryFilters"
+                                     Style="{StaticResource ContentFilterToggle}"
+                                     IsChecked="True" Checked="HistoryFilter_OnChecked" Content="全部" />
+                        <RadioButton x:Name="StarredTabButton" GroupName="HistoryFilters"
+                                     Style="{StaticResource ContentFilterToggle}"
+                                     Checked="HistoryFilter_OnChecked" Content="已收藏" />
+                    </StackPanel>
+                </Border>
+                <Border Height="36" MinWidth="120"
+                        Background="{DynamicResource Brush.Surface}"
+                        BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
+                        CornerRadius="{DynamicResource Radius.Small}">
                     <Grid>
-                        <ListBox x:Name="HistoryGrid" BorderThickness="0" Background="{DynamicResource Brush.Transparent}"
-                                 ItemContainerStyle="{StaticResource HistoryItem}"
-                                 ItemTemplate="{StaticResource HistoryItemTemplate}"
-                                 HorizontalContentAlignment="Stretch"
-                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                 SelectionChanged="HistoryGrid_OnSelectionChanged"
-                                 ScrollViewer.ScrollChanged="HistoryGrid_OnScrollChanged" />
-                        <TextBlock x:Name="EmptyStateText" Visibility="Collapsed"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                                   Margin="28" TextAlignment="Center" TextWrapping="Wrap"
-                                   Foreground="{DynamicResource Brush.TextTertiary}" />
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Path Width="13" Height="13" Margin="10,0,0,0" VerticalAlignment="Center"
+                              Stretch="Uniform" Data="{DynamicResource Icon.Search}"
+                              Stroke="{DynamicResource Brush.TextTertiary}" StrokeThickness="1.5"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              StrokeLineJoin="Round" />
+                        <TextBox x:Name="SearchBox" Grid.Column="1" Margin="8,0,8,0"
+                                 VerticalContentAlignment="Center" BorderThickness="0"
+                                 Background="{DynamicResource Brush.Transparent}"
+                                 MinHeight="0" Padding="0"
+                                 AutomationProperties.Name="搜索翻译记录"
+                                 TextChanged="SearchBox_OnTextChanged" />
+                        <TextBlock x:Name="SearchPlaceholder" Grid.Column="1" Margin="8,0,8,0"
+                                   VerticalAlignment="Center" IsHitTestVisible="False"
+                                   Foreground="{DynamicResource Brush.TextTertiary}"
+                                   Text="搜索原文或译文" />
                     </Grid>
                 </Border>
+            </DockPanel>
 
-                <Grid Grid.Column="2">
-                    <StackPanel x:Name="DetailEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                MaxWidth="300" Margin="28" Panel.ZIndex="1">
-                        <Border Width="46" Height="46" HorizontalAlignment="Center" Margin="0,0,0,14"
-                                Background="{DynamicResource Brush.SurfaceSubtle}" CornerRadius="23">
-                            <Path Width="20" Height="20" Data="{DynamicResource Icon.History}" Stretch="Uniform"
-                                  Stroke="{DynamicResource Brush.TextSecondary}" StrokeThickness="1.5"
-                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
-                        </Border>
-                        <TextBlock HorizontalAlignment="Center" FontWeight="SemiBold" Text="选择一条记录查看详情" />
-                        <TextBlock Margin="0,6,0,0" TextAlignment="Center" TextWrapping="Wrap"
-                                   Foreground="{DynamicResource Brush.TextSecondary}"
-                                   Text="左侧只显示原文；选中后可在这里完整查看、复制原文和译文。" />
-                    </StackPanel>
-
-                    <Grid x:Name="DetailCards" Visibility="Collapsed">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="18" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <Border BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
-                            CornerRadius="{DynamicResource Radius.Large}"
-                            Background="{DynamicResource Brush.Surface}" Padding="20,18">
-                        <Grid>
-                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                            <DockPanel>
-                                <Button DockPanel.Dock="Right" Style="{StaticResource Button.Icon}"
-                                        AutomationProperties.Name="复制原文"
-                                        ToolTip="复制原文" Click="CopySource_OnClick">
-                                    <Path Width="16" Height="16" Stretch="Uniform" Data="{DynamicResource Icon.Copy}"
-                                          Stroke="{DynamicResource Brush.TextSecondary}" StrokeThickness="1.5"
-                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
-                                </Button>
-                                <TextBlock FontWeight="SemiBold" VerticalAlignment="Center" Text="原文" />
-                            </DockPanel>
-                            <TextBox x:Name="SourceDetail" Grid.Row="1" Margin="0,10,0,0" IsReadOnly="True"
-                                     BorderThickness="0" Background="{DynamicResource Brush.Transparent}" Padding="0"
-                                     TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" AcceptsReturn="True" />
-                        </Grid>
-                    </Border>
-
-                    <Border Grid.Row="2" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
-                            CornerRadius="{DynamicResource Radius.Large}"
-                            Background="{DynamicResource Brush.Surface}" Padding="20,18">
-                        <Grid>
-                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                            <DockPanel>
-                                <Button DockPanel.Dock="Right" Style="{StaticResource Button.Icon}"
-                                        AutomationProperties.Name="复制译文"
-                                        ToolTip="复制译文" Click="CopyResult_OnClick">
-                                    <Path Width="16" Height="16" Stretch="Uniform" Data="{DynamicResource Icon.Copy}"
-                                          Stroke="{DynamicResource Brush.TextSecondary}" StrokeThickness="1.5"
-                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
-                                </Button>
-                                <TextBlock FontWeight="SemiBold" VerticalAlignment="Center" Text="译文" />
-                            </DockPanel>
-                            <TextBox x:Name="ResultDetail" Grid.Row="1" Margin="0,10,0,0" IsReadOnly="True"
-                                     BorderThickness="0" Background="{DynamicResource Brush.Transparent}" Padding="0"
-                                     TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" AcceptsReturn="True" />
-                        </Grid>
-                    </Border>
-
-                    <TextBlock x:Name="MetadataText" Grid.Row="3" Margin="2,10,0,0" TextWrapping="Wrap"
-                               FontSize="{DynamicResource Size.Caption}"
-                               Foreground="{DynamicResource Brush.TextTertiary}" />
-                    </Grid>
-                </Grid>
+            <!-- 卡片自带边框和白底，列表本身不再套外框：套上就是白框里再画一排白卡，
+                 只剩两层边框互相干扰。右侧 10px 内边距是留给滚动条的，
+                 否则滚动条会压在卡片圆角上。 -->
+            <Grid Grid.Row="2">
+                <ListBox x:Name="HistoryGrid" BorderThickness="0" Padding="0,0,10,0"
+                         Background="{DynamicResource Brush.Transparent}"
+                         ItemContainerStyle="{StaticResource HistoryCard}"
+                         ItemTemplate="{StaticResource HistoryCardTemplate}"
+                         HorizontalContentAlignment="Stretch"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         PreviewMouseLeftButtonDown="HistoryGrid_OnPreviewMouseLeftButtonDown"
+                         ScrollViewer.ScrollChanged="HistoryGrid_OnScrollChanged" />
+                <TextBlock x:Name="EmptyStateText" Visibility="Collapsed"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           Margin="28" TextAlignment="Center" TextWrapping="Wrap"
+                           Foreground="{DynamicResource Brush.TextTertiary}" />
             </Grid>
         </Grid>
 
+
         <ContentControl x:Name="SettingsHost" Visibility="Collapsed"
+                        KeyboardNavigation.TabNavigation="Local" />
+
+        <ContentControl x:Name="DeepTranslationHost" Visibility="Collapsed"
                         KeyboardNavigation.TabNavigation="Local" />
         </Grid>
     </Grid>

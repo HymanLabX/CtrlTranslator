@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows.Threading;
@@ -8,10 +8,12 @@ using CtrlTranslator.Diagnostics;
 namespace CtrlTranslator.Interop;
 
 /// <summary>
-/// 在 WPF 主线程安装低级键盘钩子，并把双击结果异步投递到普通事件。
+/// 在专用的钩子线程（<see cref="HookThread"/>）上安装低级键盘钩子，
+/// 并把双击结果异步投递到界面线程的普通事件。
 /// </summary>
 public sealed class LowLevelKeyboardHook : IDisposable
 {
+    /// <summary>界面线程的调度器：事件投递到这里触发。</summary>
     private readonly Dispatcher _dispatcher;
     private readonly DoubleTapDetector _detector;
     private readonly NativeMethods.HookProcedure _keyboardProcedure;
@@ -30,18 +32,16 @@ public sealed class LowLevelKeyboardHook : IDisposable
 
     public event EventHandler? DoubleTapped;
 
-    public event EventHandler? ValidTapped;
-
     public event EventHandler? EscapePressed;
 
-    public bool IsInstalled => _keyboardHookHandle != nint.Zero;
+    public bool IsInstalled => Volatile.Read(ref _keyboardHookHandle) != nint.Zero;
 
     public void Install()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!_dispatcher.CheckAccess())
         {
-            throw new InvalidOperationException("键盘钩子必须在 WPF 主线程安装。");
+            throw new InvalidOperationException("键盘钩子必须从 WPF 主线程发起安装。");
         }
 
         if (IsInstalled)
@@ -49,6 +49,13 @@ public sealed class LowLevelKeyboardHook : IDisposable
             return;
         }
 
+        // 钩子装在哪个线程，回调就在哪个线程的消息循环里执行 —— 所以必须到钩子线程上去装。
+        HookThread.Instance.Invoke(InstallOnHookThread);
+        Logger.Info("键盘钩子", "全局键盘钩子已安装（独立线程）。");
+    }
+
+    private void InstallOnHookThread()
+    {
         nint moduleHandle = NativeMethods.GetModuleHandle(moduleName: null);
         if (moduleHandle == nint.Zero)
         {
@@ -83,8 +90,6 @@ public sealed class LowLevelKeyboardHook : IDisposable
             _keyboardHookHandle = nint.Zero;
             throw new Win32Exception(errorCode, "无法安装鼠标点击监听。");
         }
-
-        Logger.Info("键盘钩子", "全局键盘钩子已安装。");
     }
 
     public void Dispose()
@@ -95,7 +100,16 @@ public sealed class LowLevelKeyboardHook : IDisposable
         }
 
         _disposed = true;
+        if (HookThread.IsCreated)
+        {
+            HookThread.Instance.Invoke(UninstallOnHookThread);
+        }
 
+        Logger.Info("键盘钩子", "全局键盘钩子已卸载。");
+    }
+
+    private void UninstallOnHookThread()
+    {
         if (_mousePollutionHookHandle != nint.Zero)
         {
             if (!NativeMethods.UnhookWindowsHookEx(_mousePollutionHookHandle))
@@ -115,8 +129,6 @@ public sealed class LowLevelKeyboardHook : IDisposable
 
             _keyboardHookHandle = nint.Zero;
         }
-
-        Logger.Info("键盘钩子", "全局键盘钩子已卸载。");
     }
 
     private nint KeyboardHookCallback(int code, nint message, nint dataPointer)
@@ -146,11 +158,6 @@ public sealed class LowLevelKeyboardHook : IDisposable
                         isKeyDown,
                         isKeyUp,
                         nowTicks);
-                    if (_detector.LastEventWasValidTap)
-                    {
-                        _dispatcher.BeginInvoke(new Action(RaiseValidTapped), DispatcherPriority.Input);
-                    }
-
                     if (doubleTapped)
                     {
                         _dispatcher.BeginInvoke(new Action(RaiseDoubleTapped), DispatcherPriority.Input);
@@ -194,11 +201,6 @@ public sealed class LowLevelKeyboardHook : IDisposable
     private void RaiseDoubleTapped()
     {
         DoubleTapped?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void RaiseValidTapped()
-    {
-        ValidTapped?.Invoke(this, EventArgs.Empty);
     }
 
     private void RaiseEscapePressed()

@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace CtrlTranslator.Interop;
 
 /// <summary>
-/// M1 使用的全部 Win32 声明。互操作代码只允许集中在此文件。
+/// 全部 Win32 声明。互操作代码只允许集中在此文件。
 /// </summary>
 internal static class NativeMethods
 {
@@ -44,7 +44,55 @@ internal static class NativeMethods
     internal const uint InputKeyboard = 1;
     internal const uint KeyEventFKeyUp = 0x0002;
 
+    // ===== 剪贴板（Core/ClipboardService 使用）=====
+    internal const uint CfUnicodeText = 13;
+    internal const uint GmemMoveable = 0x0002;
+
+    /// <summary>消息专用窗口的父窗口句柄（HWND_MESSAGE）。</summary>
+    internal static readonly nint HwndMessage = new(-3);
+
     internal delegate nint HookProcedure(int code, nint wParam, nint lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool OpenClipboard(nint newOwnerWindow);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool CloseClipboard();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool EmptyClipboard();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern uint EnumClipboardFormats(uint format);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern nint GetClipboardData(uint format);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern nint SetClipboardData(uint format, nint memory);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool IsClipboardFormatAvailable(uint format);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern nint GlobalAlloc(uint flags, nuint bytes);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern nint GlobalLock(nint memory);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GlobalUnlock(nint memory);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern nuint GlobalSize(nint memory);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern nint GlobalFree(nint memory);
 
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern nint SetWindowsHookEx(

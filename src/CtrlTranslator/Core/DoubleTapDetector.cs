@@ -1,10 +1,11 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using CtrlTranslator.Interop;
 
 namespace CtrlTranslator.Core;
 
 /// <summary>
-/// 无锁的双击触发键状态机。实例只由低级钩子所在的 WPF 线程访问。
+/// 无锁的双击触发键状态机。实例只由钩子线程（<see cref="HookThread"/>）访问，
+/// 键盘回调和"按键期间有没有鼠标点击"的鼠标回调都跑在那一条线程上，所以不需要加锁。
 /// </summary>
 public sealed class DoubleTapDetector
 {
@@ -13,11 +14,14 @@ public sealed class DoubleTapDetector
     private readonly long _maxKeyHoldTicks;
 
     // 这三个字段与 SPEC §2.1 的状态机定义逐一对应。
-    private long _lastTapReleaseTicks;
-    private long _currentPressTicks;
-    private bool _pollutedByOtherKey;
+    // 哨兵用 -1 而不是 0：0 本身是一个合法的 Stopwatch 时间戳，
+    // 两个含义撞在一起会让"按下时刻恰好为 0"的那次敲击被整段吞掉，
+    // 也让这个状态机没法用合成时间戳做验算。
+    private const long NoTimestamp = -1;
 
-    public bool LastEventWasValidTap { get; private set; }
+    private long _lastTapReleaseTicks = NoTimestamp;
+    private long _currentPressTicks = NoTimestamp;
+    private bool _pollutedByOtherKey;
 
     public DoubleTapDetector(string triggerKey, int doubleTapIntervalMs, int maxKeyHoldMs)
     {
@@ -31,7 +35,6 @@ public sealed class DoubleTapDetector
     /// </summary>
     public bool ProcessKeyEvent(uint virtualKeyCode, bool isKeyDown, bool isKeyUp, long nowTicks)
     {
-        LastEventWasValidTap = false;
         bool isTriggerKey = IsTriggerKey(virtualKeyCode);
 
         if (isKeyDown)
@@ -39,7 +42,7 @@ public sealed class DoubleTapDetector
             if (isTriggerKey)
             {
                 // 自动重复的 KEYDOWN 不得重新计时。
-                if (_currentPressTicks == 0)
+                if (_currentPressTicks == NoTimestamp)
                 {
                     _currentPressTicks = nowTicks;
                     _pollutedByOtherKey = false;
@@ -53,7 +56,7 @@ public sealed class DoubleTapDetector
             return false;
         }
 
-        if (!isKeyUp || !isTriggerKey || _currentPressTicks == 0)
+        if (!isKeyUp || !isTriggerKey || _currentPressTicks == NoTimestamp)
         {
             return false;
         }
@@ -63,24 +66,22 @@ public sealed class DoubleTapDetector
             && heldTicks < _maxKeyHoldTicks
             && !_pollutedByOtherKey;
 
-        _currentPressTicks = 0;
+        _currentPressTicks = NoTimestamp;
         _pollutedByOtherKey = false;
 
         if (!isValidTap)
         {
-            _lastTapReleaseTicks = 0;
+            _lastTapReleaseTicks = NoTimestamp;
             return false;
         }
 
-        LastEventWasValidTap = true;
-
         long intervalTicks = nowTicks - _lastTapReleaseTicks;
-        if (_lastTapReleaseTicks != 0
+        if (_lastTapReleaseTicks != NoTimestamp
             && intervalTicks >= 0
             && intervalTicks < _doubleTapIntervalTicks)
         {
             // 触发后立即重置，使连续三次敲击只触发一次。
-            _lastTapReleaseTicks = 0;
+            _lastTapReleaseTicks = NoTimestamp;
             return true;
         }
 
@@ -93,7 +94,7 @@ public sealed class DoubleTapDetector
     /// </summary>
     public void MarkMouseClick()
     {
-        if (_currentPressTicks != 0)
+        if (_currentPressTicks != NoTimestamp)
         {
             _pollutedByOtherKey = true;
         }

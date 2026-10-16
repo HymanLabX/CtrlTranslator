@@ -31,7 +31,7 @@
 
 ---
 
-## 3. 技术栈（不得擅自更换）
+## 3. 技术栈
 
 | 项 | 规定 |
 |---|---|
@@ -80,6 +80,7 @@ System.Speech
 CtrlTranslator.sln
 LICENSE                         # MIT，不要改
 build.ps1                       # 本机打包脚本
+installer/                      # Inno Setup 安装包脚本与中文语言包
 .github/workflows/
 └─ build-and-release.yml        # GitHub 自动编译 + 自动发版
 src/CtrlTranslator/
@@ -88,41 +89,63 @@ src/CtrlTranslator/
 ├─ App.xaml / App.xaml.cs    # 应用入口、单实例、全局异常兜底
 ├─ Interop/                  # 所有 Win32 P/Invoke 集中在这里，别处不许写 DllImport
 │   ├─ NativeMethods.cs
+│   ├─ HookThread.cs           # 专用钩子线程（键盘 / 鼠标钩子都装在这上面，见 SPEC §2.1）
 │   ├─ LowLevelKeyboardHook.cs
 │   ├─ LowLevelMouseHook.cs
 │   └─ DpiHelper.cs
 ├─ Core/                     # 划词核心链路
 │   ├─ DoubleTapDetector.cs
 │   ├─ TextCapture.cs
+│   ├─ ClipboardService.cs     # 全部剪贴板读写 + 完整备份还原（SPEC §3.2）
 │   ├─ ForegroundApp.cs
 │   └─ AppState.cs
 ├─ Translation/              # 翻译引擎
 │   ├─ ITranslationClient.cs
 │   ├─ OpenAiCompatibleClient.cs
+│   ├─ ApiErrorClassifier.cs   # HTTP 错误归类，报错与降级共用（SPEC §9.1）
+│   ├─ FailoverPolicy.cs
 │   ├─ PromptBuilder.cs
+│   ├─ TextLanguage.cs         # 语种判定（SPEC §5.4）
+│   ├─ DeepPromptBuilder.cs    # 深度翻译（SPEC §15）
+│   ├─ DeepTranslationResult.cs
+│   ├─ DictionaryEntry.cs      # 词典条目解析
 │   ├─ ModelHeuristics.cs
 │   └─ TranslationService.cs
 ├─ Data/                     # SQLite
 │   ├─ Database.cs
 │   ├─ TranslationRecord.cs
-│   └─ HistoryRepository.cs
+│   ├─ HistoryRepository.cs
+│   └─ HistoryCsvExporter.cs
 ├─ Settings/
 │   ├─ AppSettings.cs
+│   ├─ ApiProfile.cs
 │   ├─ SettingsStore.cs
 │   ├─ TranslationMode.cs
-│   └─ BuiltInModes.cs
+│   ├─ BuiltInModes.cs
+│   ├─ ProviderPresets.cs
+│   ├─ ExtraRequestBodyHelper.cs
+│   ├─ PopupPresets.cs / PopupThemes.cs
+│   └─ StartupRegistration.cs
 ├─ Speech/
 │   └─ SpeechService.cs
 ├─ Diagnostics/
 │   ├─ Logger.cs
 │   ├─ ErrorMessages.cs
 │   └─ DiagnosticRunner.cs
+├─ Update/                   # 自动更新（M6）
+│   ├─ UpdateChecker.cs / UpdateService.cs
+│   ├─ UpdateDownloader.cs
+│   └─ InstallationInfo.cs
+├─ Themes/                   # 设计令牌与控件样式（DESIGN.md §7）
 ├─ UI/
 │   ├─ TrayIconController.cs
-│   ├─ PopupWindow.xaml(.cs)
+│   ├─ PopupWindow.xaml(.cs) / PopupThemePalette.cs
 │   ├─ MainWindow.xaml(.cs)
-│   ├─ SettingsWindow.xaml(.cs)
-│   └─ OnboardingWindow.xaml(.cs)
+│   ├─ DeepTranslationView.xaml(.cs)
+│   ├─ SettingsWindow.xaml(.cs)   # 嵌在主窗口里的设置页（名字是历史遗留，不是独立窗口）
+│   ├─ OnboardingWindow.xaml(.cs)
+│   ├─ UpdateWindow.xaml(.cs)
+│   └─ *Converter.cs
 └─ Assets/
     └─ (图标资源)
 ```

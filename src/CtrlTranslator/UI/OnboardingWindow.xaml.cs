@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
@@ -16,6 +16,10 @@ public partial class OnboardingWindow : Window
     private readonly SettingsStore _settingsStore;
     private readonly Action _settingsApplied;
     private readonly Func<ApiProfile, DiagnosticRunner> _diagnosticRunnerFactory;
+    /// <summary>左栏那四步的名字，顺序即 <c>_step</c> 的 1 到 4。</summary>
+    private static readonly string[] StepNames =
+        ["欢迎", "选择服务商", "填写连接信息", "测试并完成"];
+
     private readonly IReadOnlyList<ProviderChoice> _providers =
         ProviderPresets.All.Select(preset => new ProviderChoice(preset)).ToArray();
     private readonly ObservableCollection<DiagnosticResult> _diagnostics = [];
@@ -139,8 +143,11 @@ public partial class OnboardingWindow : Window
             // 见 SettingsWindow 里同名调用的注释：首次连接某个服务商时的代理探测/DNS
             // 解析可能在真正 await 之前同步耗时，扔进线程池避免卡住向导界面。
             string previousModel = ModelBox.Text;
+            // 给个上限：对方接了连接却迟迟不回话时，不能让向导一直转着。和设置页一样是 15 秒。
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(15));
             IReadOnlyList<string> models = await Task.Run(
-                () => OpenAiCompatibleClient.FetchModelsAsync(baseUrl, apiKey, CancellationToken.None));
+                () => OpenAiCompatibleClient.FetchModelsAsync(baseUrl, apiKey, timeout.Token),
+                timeout.Token);
             if (models.Count == 0)
             {
                 SetStatus("服务商没有返回模型列表，保留原有选项，你也可以直接手输模型名。", isError: false);
@@ -155,8 +162,8 @@ public partial class OnboardingWindow : Window
         catch (Exception exception)
         {
             Logger.Error("首次向导", "拉取模型列表失败。", exception);
-            UserFacingError error = ErrorMessages.FromException(exception, ModelBox.Text, thinkingDisabled: false);
-            SetStatus(error.Message, isError: true);
+            // 和设置页同一套说法：Key 错了就说 Key 错了，服务商不提供列表才说"不支持列出模型"。
+            SetStatus(SettingsWindow.DescribeModelFetchFailure(exception), isError: true);
         }
     }
 
@@ -337,9 +344,26 @@ public partial class OnboardingWindow : Window
         CredentialsPage.Visibility = _step == 3 ? Visibility.Visible : Visibility.Collapsed;
         TestPage.Visibility = _step == 4 ? Visibility.Visible : Visibility.Collapsed;
         StepText.Text = $"第 {_step} / 4 步";
+        RefreshStepRail();
         BackButton.IsEnabled = _step > 1 && _step < 4;
         NextButton.Visibility = _step < 4 ? Visibility.Visible : Visibility.Collapsed;
         FinishButton.Visibility = _step == 4 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// 重画左栏的四个步骤：走过的打勾、当前的高亮、没到的留空心圈。
+    /// </summary>
+    /// <remarks>
+    /// 每次整体重建 ItemsSource，而不是改现有对象的 State —— StepChoice 是纯记录、
+    /// 没有变更通知，改字段界面不会动。四个元素，重建的代价可以忽略。
+    /// </remarks>
+    private void RefreshStepRail()
+    {
+        StepList.ItemsSource = StepNames
+            .Select((name, index) => new StepChoice(
+                name,
+                index + 1 < _step ? "done" : index + 1 == _step ? "current" : "todo"))
+            .ToArray();
     }
 
     private ProviderPreset SelectedPreset() =>
@@ -387,6 +411,9 @@ public partial class OnboardingWindow : Window
             ExtraRequestBody = preset.ExtraRequestBody
         };
     }
+
+    /// <summary>左栏步骤行的绑定对象。<c>State</c> 是 done / current / todo 三选一。</summary>
+    private sealed record StepChoice(string Name, string State);
 
     /// <summary>
     /// 列表显示用的包装。绑定需要一个 Visibility，而 Settings 层的 ProviderPreset

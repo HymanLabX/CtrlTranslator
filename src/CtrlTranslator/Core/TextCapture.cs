@@ -1,25 +1,26 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Windows;
 using System.Windows.Threading;
 using CtrlTranslator.Diagnostics;
 using CtrlTranslator.Interop;
-using WpfClipboard = System.Windows.Clipboard;
-using WpfDataFormats = System.Windows.DataFormats;
-using FormsClipboard = System.Windows.Forms.Clipboard;
 
 namespace CtrlTranslator.Core;
 
 /// <summary>
-/// 严格按 SPEC §3.1 的七步流程，通过剪贴板取得当前选中文本并还原现场。
+/// 按 SPEC §3.1 的流程，通过剪贴板取得当前选中文本并还原现场。
 /// </summary>
+/// <remarks>
+/// 剪贴板的读写全部交给 <see cref="ClipboardService"/>：它负责重试规则，
+/// 也负责把剪贴板<b>完整</b>备份、还原（不只是文字，截图、文件、带格式文字都在内）。
+/// </remarks>
 public sealed class TextCapture
 {
-    private const int ClipboardRetryCount = 5;
-    private const int ClipboardRetryDelayMs = 20;
     private const int ClipboardPollIntervalMs = 10;
     private const int ClipboardRestoreDelayMs = 120;
+
+    /// <summary>剪贴板序列号变了之后，最多再等多久让文字格式到位。</summary>
+    private const int TextArrivalGraceMs = 200;
 
     private static readonly ushort[] ModifierKeys =
     [
@@ -47,15 +48,13 @@ public sealed class TextCapture
             throw new InvalidOperationException("剪贴板取词必须在 WPF 主线程执行。");
         }
 
-        // 1. 记录复制前的序列号。
-        uint sequenceBefore = NativeMethods.GetClipboardSequenceNumber();
+        // 1. 先把剪贴板原样备份下来。
+        ClipboardSnapshot snapshot = await ClipboardService.SnapshotAsync();
 
-        // 2. 只备份 CF_UNICODETEXT；其他格式按 v1.0 限制记录日志。
-        ClipboardSnapshot snapshot = await ReadClipboardSnapshotAsync();
-        if (snapshot.HadUnsupportedData)
-        {
-            Logger.Warning("剪贴板", "原剪贴板包含图片、文件或其他非 Unicode 文本，v1.0 无法完整还原。");
-        }
+        // 2. 记录复制前的序列号。⚠️ 必须放在备份之后：备份时，原程序为"延迟渲染"的格式
+        //    现场生成内容也会让序列号变化；记早了，这次变化会被误当成"复制成功"，
+        //    读到的就是旧剪贴板里的东西。
+        uint sequenceBefore = NativeMethods.GetClipboardSequenceNumber();
 
         // 3. 释放仍处于按下状态的物理修饰键。
         ReleasePressedModifierKeys();
@@ -63,7 +62,7 @@ public sealed class TextCapture
         // 4. 模拟 Ctrl+C。
         SendCopyShortcut();
 
-        // 5/6. 每 10ms 轮询序列号，超时则静默返回。
+        // 5/6. 每 10ms 轮询序列号，超时则静默返回。剪贴板没被动过，也就不用还原。
         bool clipboardChanged = await WaitForClipboardChangeAsync(sequenceBefore, clipboardWaitMs);
         if (!clipboardChanged)
         {
@@ -74,13 +73,16 @@ public sealed class TextCapture
         string? capturedText;
         try
         {
-            capturedText = await ReadUnicodeTextAsync("读取复制结果");
+            // 序列号一变就读可能早了一拍：有的程序先清空剪贴板、再分几次放各种格式，
+            // 文字不一定是第一个到的。以前这种情况直接读到空，表现为"偶尔取不到词"。
+            await WaitForTextAsync();
+            capturedText = await ClipboardService.ReadTextAsync();
         }
         finally
         {
             // 7. 必须延迟 120ms，避开目标程序自己的后续剪贴板操作。
             await Task.Delay(ClipboardRestoreDelayMs);
-            await RestoreClipboardAsync(snapshot);
+            await ClipboardService.RestoreAsync(snapshot);
         }
 
         string cleanedText = capturedText?.Trim() ?? string.Empty;
@@ -162,107 +164,14 @@ public sealed class TextCapture
         return NativeMethods.GetClipboardSequenceNumber() != sequenceBefore;
     }
 
-    private static async Task<ClipboardSnapshot> ReadClipboardSnapshotAsync()
+    private static async Task WaitForTextAsync()
     {
-        return await RetryClipboardAsync(
-            () =>
-            {
-                System.Windows.IDataObject? dataObject = WpfClipboard.GetDataObject();
-                if (dataObject is null)
-                {
-                    return new ClipboardSnapshot(Text: null, HadUnsupportedData: false);
-                }
-
-                bool hasUnicodeText = dataObject.GetDataPresent(WpfDataFormats.UnicodeText, autoConvert: false);
-                if (hasUnicodeText)
-                {
-                    string? text = dataObject.GetData(WpfDataFormats.UnicodeText, autoConvert: false) as string;
-                    return new ClipboardSnapshot(text, HadUnsupportedData: false);
-                }
-
-                bool hasAnyData = dataObject.GetFormats(autoConvert: false).Length > 0;
-                return new ClipboardSnapshot(Text: null, HadUnsupportedData: hasAnyData);
-            },
-            "备份剪贴板");
-    }
-
-    private static async Task<string?> ReadUnicodeTextAsync(string operationName)
-    {
-        return await RetryClipboardAsync(
-            () =>
-            {
-                System.Windows.IDataObject? dataObject = WpfClipboard.GetDataObject();
-                if (dataObject is null
-                    || !dataObject.GetDataPresent(WpfDataFormats.UnicodeText, autoConvert: false))
-                {
-                    return null;
-                }
-
-                return dataObject.GetData(WpfDataFormats.UnicodeText, autoConvert: false) as string;
-            },
-            operationName);
-    }
-
-    private static async Task RestoreClipboardAsync(ClipboardSnapshot snapshot)
-    {
-        if (snapshot.Text is not null)
+        long deadline = Stopwatch.GetTimestamp() + (long)TextArrivalGraceMs * Stopwatch.Frequency / 1000;
+        while (!ClipboardService.HasText() && Stopwatch.GetTimestamp() < deadline)
         {
-            try
-            {
-                FormsClipboard.SetDataObject(
-                    snapshot.Text,
-                    copy: true,
-                    ClipboardRetryCount,
-                    ClipboardRetryDelayMs);
-                return;
-            }
-            catch (Exception exception)
-            {
-                Logger.Error("剪贴板", "还原剪贴板文本失败（已完成 5 次重试）。", exception);
-                throw new ClipboardUnavailableException(
-                    "剪贴板正被其他程序占用，稍等一下再试。",
-                    exception);
-            }
+            await Task.Delay(ClipboardPollIntervalMs);
         }
-
-        await RetryClipboardAsync(
-            () =>
-            {
-                WpfClipboard.Clear();
-                return true;
-            },
-            "清空复制产生的剪贴板内容");
     }
-
-    private static async Task<T> RetryClipboardAsync<T>(Func<T> operation, string operationName)
-    {
-        Exception? lastException = null;
-        for (int attempt = 1; attempt <= ClipboardRetryCount; attempt++)
-        {
-            try
-            {
-                return operation();
-            }
-            catch (Exception exception)
-            {
-                lastException = exception;
-                Logger.Warning(
-                    "剪贴板",
-                    $"{operationName}第 {attempt} 次失败，将按规则重试。 {exception.GetType().Name}: {exception.Message}");
-
-                if (attempt < ClipboardRetryCount)
-                {
-                    await Task.Delay(ClipboardRetryDelayMs);
-                }
-            }
-        }
-
-        throw new ClipboardUnavailableException(
-            "剪贴板正被其他程序占用，稍等一下再试。",
-            lastException);
-    }
-
-    private sealed record ClipboardSnapshot(string? Text, bool HadUnsupportedData);
 }
 
 /// <summary>

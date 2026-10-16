@@ -1,4 +1,4 @@
-<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!-- 所有图标均按 16×16 坐标绘制；颜色、描边与端点样式由使用处提供。 -->
     <Geometry x:Key="Icon.Speaker">M2.25,6.25 L5.25,6.25 8.5,3.5 8.5,12.5 5.25,9.75 2.25,9.75 Z M11,5.25 A3.5,3.5 0 0 1 11,10.75 M12.75,3.5 A6,6 0 0 1 12.75,12.5</Geometry>
@@ -7,6 +7,10 @@
     <Geometry x:Key="Icon.StarFilled">M8,1.75 L9.85,5.5 14,6.1 11,9.05 11.7,13.25 8,11.25 4.3,13.25 5,9.05 2,6.1 6.15,5.5 Z</Geometry>
     <Geometry x:Key="Icon.Copy">M5.25,5.25 L12.75,5.25 Q13.75,5.25 13.75,6.25 L13.75,12.75 Q13.75,13.75 12.75,13.75 L6.25,13.75 Q5.25,13.75 5.25,12.75 Z M2.25,10.75 L2.25,3.25 Q2.25,2.25 3.25,2.25 L10.75,2.25</Geometry>
     <Geometry x:Key="Icon.Check">M2.5,8.25 L6.25,12 13.5,4.5</Geometry>
+    <!-- 引导向导的步骤状态：已完成用 Check，当前用实心点，未开始用空心圈。
+         圆按 Icon.Error 的写法拆成两段 180° 弧 —— WPF 的路径语法没有整圆命令。 -->
+    <Geometry x:Key="Icon.Dot">M8,4.5 A3.5,3.5 0 1 0 8,11.5 A3.5,3.5 0 1 0 8,4.5</Geometry>
+    <Geometry x:Key="Icon.Circle">M8,2.75 A5.25,5.25 0 1 0 8,13.25 A5.25,5.25 0 1 0 8,2.75</Geometry>
     <Geometry x:Key="Icon.Pin">M5,2.25 L11,2.25 10.25,6 12.5,8.25 8.75,8.25 8,13.75 7.25,8.25 3.5,8.25 5.75,6 Z</Geometry>
     <Geometry x:Key="Icon.Close">M3.25,3.25 L12.75,12.75 M12.75,3.25 L3.25,12.75</Geometry>
     <Geometry x:Key="Icon.Search">M6.75,2.25 A4.5,4.5 0 1 0 6.75,11.25 A4.5,4.5 0 1 0 6.75,2.25 M10.1,10.1 L13.75,13.75</Geometry>
@@ -20,4 +24,10 @@
     <Geometry x:Key="Icon.Error">M8,1.75 A6.25,6.25 0 1 0 8,14.25 A6.25,6.25 0 1 0 8,1.75 M5.5,5.5 L10.5,10.5 M10.5,5.5 L5.5,10.5</Geometry>
     <Geometry x:Key="Icon.Info">M8,1.75 A6.25,6.25 0 1 0 8,14.25 A6.25,6.25 0 1 0 8,1.75 M8,7 L8,11 M8,4.75 L8,4.8</Geometry>
     <Geometry x:Key="Icon.History">M8,2 A6,6 0 1 1 3.75,3.75 M2,2 L2,6 6,6 M8,4.75 L8,8 10.5,9.5</Geometry>
+    <!-- 双向箭头：语言方向用。上箭头向右、下箭头向左，表示这两门语言互为来去。 -->
+    <Geometry x:Key="Icon.Swap">M2.5,5.5 L13.5,5.5 M10.5,2.5 L13.5,5.5 L10.5,8.5 M13.5,10.5 L2.5,10.5 M5.5,7.5 L2.5,10.5 L5.5,13.5</Geometry>
+    <!-- 对话气泡：翻译偏好用。Settings 的滑杆表示"参数"，这个表示"措辞"，两者不会看混。 -->
+    <Geometry x:Key="Icon.Preference">M2.5,3.5 Q2.5,2.5 3.5,2.5 L12.5,2.5 Q13.5,2.5 13.5,3.5 L13.5,9.5 Q13.5,10.5 12.5,10.5 L6.5,10.5 L3.5,13.5 L3.5,10.5 Q2.5,10.5 2.5,9.5 Z</Geometry>
+    <!-- 摊开的书：深度翻译页用。左右两页 + 中缝，跟 History 的时钟形成区分。 -->
+    <Geometry x:Key="Icon.Book">M8,4.25 Q5.75,2.5 2,3 L2,12.25 Q5.75,11.75 8,13.5 Q10.25,11.75 14,12.25 L14,3 Q10.25,2.5 8,4.25 Z M8,4.25 L8,13.5</Geometry>
 </ResourceDictionary>

@@ -1,14 +1,15 @@
 using System.Diagnostics;
+using System.IO;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Net.Http;
 using System.Security.Authentication;
 using System.Security.Principal;
+using System.Speech.Synthesis;
 using CtrlTranslator.Data;
 using CtrlTranslator.Settings;
 using CtrlTranslator.Translation;
-using Microsoft.Win32;
 
 namespace CtrlTranslator.Diagnostics;
 
@@ -72,11 +73,16 @@ public sealed class DiagnosticRunner
         await RunCheckAsync(1, "配置完整性", async token =>
         {
             await Task.CompletedTask;
-            if (string.IsNullOrWhiteSpace(_profile.BaseUrl)
-                || string.IsNullOrWhiteSpace(_profile.ApiKey)
-                || string.IsNullOrWhiteSpace(_profile.Model))
+            if (string.IsNullOrWhiteSpace(_profile.BaseUrl) || string.IsNullOrWhiteSpace(_profile.Model))
             {
-                return Failed("服务地址、API Key 或模型名尚未填写完整。");
+                return Failed("服务地址或模型名尚未填写。");
+            }
+
+            if (string.IsNullOrWhiteSpace(_profile.ApiKey))
+            {
+                return ApiProfile.IsLocalAddress(_profile.BaseUrl)
+                    ? Passed("服务地址和模型名已填写；这是本机服务，不需要 API Key。")
+                    : Failed("还没有填写 API Key。");
             }
 
             return Passed("服务地址、API Key 和模型名均已填写。");
@@ -98,6 +104,11 @@ public sealed class DiagnosticRunner
                 : Warning("地址格式正确，但没有看到常见的 /v1 或 /v4 版本路径，请向服务商核对。");
         });
 
+        // 翻译请求会不会经过系统代理。DNS 和连接两项要据此判断：
+        // 走代理时域名由代理去解析、连接对象是代理本身，直接拿目标地址去测会得出错误结论 ——
+        // 实际日志里出现过：代理软件没开，这两项照样打勾，到第 5 项才莫名其妙地失败。
+        Uri? systemProxy = null;
+
         await RunCheckAsync(3, "DNS 解析", async token =>
         {
             if (serviceUri is null)
@@ -105,36 +116,46 @@ public sealed class DiagnosticRunner
                 return Failed("服务地址无效，无法解析域名。");
             }
 
-            IPAddress[] addresses = await Dns.GetHostAddressesAsync(serviceUri.Host, token);
-            return addresses.Length > 0
-                ? Passed($"已解析到 {addresses.Length} 个网络地址。")
+            systemProxy = OpenAiCompatibleClient.FindSystemProxy(serviceUri);
+            try
+            {
+                IPAddress[] addresses = await Dns.GetHostAddressesAsync(serviceUri.Host, token);
+                if (addresses.Length > 0)
+                {
+                    return Passed($"已解析到 {addresses.Length} 个网络地址。");
+                }
+            }
+            catch (SocketException) when (systemProxy is not null)
+            {
+                // 走代理时本机解析不了不要紧，代理会替我们解析。
+            }
+
+            return systemProxy is not null
+                ? Warning($"本机没能解析这个域名，但翻译请求经过系统代理（{systemProxy.Authority}），由代理负责解析，通常不影响使用。")
                 : Failed("没有解析到服务器地址，请检查网络或域名。");
         });
 
-        await RunCheckAsync(4, "TCP / TLS 连接", async token =>
+        await RunCheckAsync(4, "网络连接", async token =>
         {
             if (serviceUri is null)
             {
                 return Failed("服务地址无效，无法建立连接。");
             }
 
-            int port = serviceUri.IsDefaultPort
-                ? serviceUri.Scheme == "https" ? 443 : 80
-                : serviceUri.Port;
-            using TcpClient tcp = new();
-            await tcp.ConnectAsync(serviceUri.Host, port, token);
-            if (serviceUri.Scheme == "http")
+            if (systemProxy is not null)
             {
-                return Warning("TCP 连接正常；该地址使用未加密的 HTTP，没有 TLS 保护。");
+                return await CheckThroughProxyAsync(serviceUri, systemProxy, token);
             }
 
-            await using SslStream ssl = new(tcp.GetStream(), leaveInnerStreamOpen: false);
-            await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+            (bool connected, string detail) = await TryDirectConnectAsync(serviceUri, token);
+            if (!connected)
             {
-                TargetHost = serviceUri.Host,
-                EnabledSslProtocols = SslProtocols.None
-            }, token);
-            return Passed($"TCP 和 TLS 连接正常，使用 {ssl.SslProtocol}。");
+                return Failed(detail);
+            }
+
+            return serviceUri.Scheme == "http"
+                ? Warning(detail + "该地址使用未加密的 HTTP，没有 TLS 保护（本机服务可以忽略）。")
+                : Passed(detail);
         });
 
         await RunCheckAsync(5, "身份认证", async token =>
@@ -161,9 +182,19 @@ public sealed class DiagnosticRunner
         {
             EnsureApiConfiguration();
             using OpenAiCompatibleClient client = new();
-            TranslationClientResult result = await client.TranslateAsync(
-                CreateRequest("只回复一个字：好", maxTokens: 1), null, token);
-            return Passed($"模型「{_profile.Model}」可用，返回“{Shorten(result.Text, 12)}”。");
+            try
+            {
+                // 给 16 个 token 而不是 1 个：会"先想一下"的模型，1 个 token 刚好用在思考上，
+                // 一个字都吐不出来，以前这会被误判成模型不可用。
+                TranslationClientResult result = await client.TranslateAsync(
+                    CreateRequest("只回复一个字：好", maxTokens: 16), null, token);
+                return Passed($"模型「{_profile.Model}」可用，返回“{Shorten(result.Text, 12)}”。");
+            }
+            catch (EmptyTranslationException)
+            {
+                // 服务商正常应答了，只是这次没吐文字 —— 模型本身是存在、可用的。
+                return Passed($"模型「{_profile.Model}」可用（这次测试没有返回文字，不影响翻译）。");
+            }
         });
 
         await RunCheckAsync(7, "翻译链路", async token =>
@@ -198,11 +229,12 @@ public sealed class DiagnosticRunner
             (int total, int english) = CountInstalledVoices();
             if (total == 0)
             {
-                return Failed("没有检测到 Windows 语音，请在系统设置中安装语音包。");
+                return Failed("没有检测到可用的 Windows 语音，请在系统设置中安装语音包。");
             }
 
             return english > 0
-                ? Passed($"检测到 {total} 个语音，其中 {english} 个英语语音。"): Warning($"检测到 {total} 个语音，但没有英语语音；英文朗读可能不可用。");
+                ? Passed($"检测到 {total} 个可用语音，其中 {english} 个英语语音。")
+                : Warning($"检测到 {total} 个可用语音，但没有英语语音；英文朗读可能不可用。");
         });
 
         await RunCheckAsync(10, "历史数据库", async token =>
@@ -294,18 +326,97 @@ public sealed class DiagnosticRunner
 
     private void EnsureApiConfiguration()
     {
-        if (string.IsNullOrWhiteSpace(_profile.ApiKey)
-            || string.IsNullOrWhiteSpace(_profile.Model)
-            || !Uri.TryCreate(_profile.BaseUrl, UriKind.Absolute, out _))
+        if (string.IsNullOrWhiteSpace(_profile.Model)
+            || !Uri.TryCreate(_profile.BaseUrl, UriKind.Absolute, out _)
+            || (string.IsNullOrWhiteSpace(_profile.ApiKey) && !ApiProfile.IsLocalAddress(_profile.BaseUrl)))
         {
             throw new InvalidOperationException("翻译服务配置尚未填写完整。");
         }
     }
 
+    /// <summary>
+    /// 走系统代理时的连接检查：先看代理本身连不连得上；连不上再试直连，
+    /// 因为翻译遇到"代理端口拒绝连接"时会自动改走直连（负责人 2026-10 决定）。
+    /// </summary>
+    private static async Task<(DiagnosticStatus, string)> CheckThroughProxyAsync(
+        Uri serviceUri,
+        Uri proxy,
+        CancellationToken cancellationToken)
+    {
+        string proxyName = proxy.Authority;
+        try
+        {
+            using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(ConnectTimeout);
+            using TcpClient tcp = new();
+            await tcp.ConnectAsync(proxy.Host, proxy.Port, timeout.Token);
+            return Passed($"翻译请求经过系统代理（{proxyName}），代理软件在运行。");
+        }
+        catch (Exception exception) when (exception is SocketException or OperationCanceledException
+            && !cancellationToken.IsCancellationRequested)
+        {
+            Logger.Info("一键诊断", $"系统代理 {proxyName} 连不上：{exception.Message}");
+        }
+
+        (bool connected, string directDetail) = await TryDirectConnectAsync(serviceUri, cancellationToken);
+        return connected
+            ? Warning($"你设置了系统代理（{proxyName}），但它连不上，代理软件可能没开。直连可以连上服务器，翻译会自动改为直连。")
+            : Failed($"你设置了系统代理（{proxyName}），但它连不上，代理软件可能没开；直连也连不上（{directDetail}）。把代理软件打开再试。");
+    }
+
+    /// <summary>不经过代理，直接和服务器建立 TCP（以及 HTTPS 的 TLS）连接。</summary>
+    private static async Task<(bool Connected, string Detail)> TryDirectConnectAsync(
+        Uri serviceUri,
+        CancellationToken cancellationToken)
+    {
+        int port = serviceUri.IsDefaultPort
+            ? serviceUri.Scheme == "https" ? 443 : 80
+            : serviceUri.Port;
+        try
+        {
+            using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(ConnectTimeout);
+            using TcpClient tcp = new();
+            await tcp.ConnectAsync(serviceUri.Host, port, timeout.Token);
+            if (serviceUri.Scheme == "http")
+            {
+                return (true, "TCP 连接正常。");
+            }
+
+            await using SslStream ssl = new(tcp.GetStream(), leaveInnerStreamOpen: false);
+            await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+            {
+                TargetHost = serviceUri.Host,
+                EnabledSslProtocols = SslProtocols.None
+            }, timeout.Token);
+            return (true, $"TCP 和 TLS 连接正常，使用 {ssl.SslProtocol}。");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return (false, $"{ConnectTimeout.TotalSeconds:0} 秒内没有连上服务器，网络可能不通");
+        }
+        catch (AuthenticationException exception)
+        {
+            Logger.Info("一键诊断", $"TLS 握手失败：{Logger.Describe(exception)}");
+            return (false, "加密连接（TLS）没有建立成功，可能是网络拦截了 HTTPS 或系统时间不对");
+        }
+        catch (Exception exception) when (exception is SocketException or IOException)
+        {
+            Logger.Info("一键诊断", $"直连失败：{Logger.Describe(exception)}");
+            return (false, "连不上服务器，请检查网络和服务地址");
+        }
+    }
+
+    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
+
     private static (DiagnosticStatus, string) Passed(string detail) => (DiagnosticStatus.Passed, detail);
     private static (DiagnosticStatus, string) Warning(string detail) => (DiagnosticStatus.Warning, detail);
     private static (DiagnosticStatus, string) Failed(string detail) => (DiagnosticStatus.Failed, detail);
 
+    /// <summary>
+    /// 报告里的 Key 只露最后 4 位。Key 太短（不到 12 位）时一位都不露 ——
+    /// 以前 4 位以内的 Key 会被原样整串印出来。
+    /// </summary>
     private static string RedactApiKey(string apiKey)
     {
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -313,62 +424,47 @@ public sealed class DiagnosticRunner
             return "未填写";
         }
 
-        string suffix = apiKey.Length <= 4 ? apiKey : apiKey[^4..];
-        return $"sk-****{suffix}";
+        return apiKey.Length < 12 ? "****（已隐藏）" : $"sk-****{apiKey[^4..]}";
     }
 
     private static string Shorten(string value, int length) =>
         value.Length <= length ? value : $"{value[..length]}…";
 
-    private static string ToHumanDiagnosticMessage(Exception exception)
+    private string ToHumanDiagnosticMessage(Exception exception)
     {
-        if (exception is ApiHttpException api)
-        {
-            return ErrorMessages.FromException(api, string.Empty, thinkingDisabled: false).Message;
-        }
-
-        if (exception is SocketException or HttpRequestException or AuthenticationException)
-        {
-            return "连接服务器失败，请检查网络、代理和服务地址。";
-        }
-
         if (exception is InvalidOperationException invalid)
         {
             return invalid.Message;
         }
 
+        if (exception is ApiHttpException or SocketException or HttpRequestException or AuthenticationException
+            or FirstTokenTimeoutException or OverallTimeoutException or TranslationJsonException)
+        {
+            // 和浮窗报错用同一套说法：代理没开、TLS 被拦、域名解析失败、思考模式没关……各给各的话。
+            return ErrorMessages.FromException(
+                exception,
+                _profile.Model,
+                ExtraRequestBodyHelper.IsThinkingDisabled(_profile.ExtraRequestBody)).Message;
+        }
+
         return "检查没有通过，详细原因已写入日志。";
     }
 
+    /// <summary>
+    /// 数一数朗读功能实际能用的语音。和 <see cref="CtrlTranslator.Speech.SpeechService"/> 同一个来源：
+    /// 以前这里还把注册表里的 OneCore 语音也算进来，可朗读用的接口（SAPI 5）根本用不了它们，
+    /// 结果诊断说"有语音"，浮窗上的朗读按钮却是灰的。
+    /// </summary>
     private static (int Total, int English) CountInstalledVoices()
     {
-        List<string> names = [];
-        string[] paths =
-        [
-            @"SOFTWARE\Microsoft\Speech\Voices\Tokens",
-            @"SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens"
-        ];
-        foreach (RegistryKey root in new[] { Registry.CurrentUser, Registry.LocalMachine })
-        {
-            foreach (string path in paths)
-            {
-                using RegistryKey? key = root.OpenSubKey(path);
-                if (key is null)
-                {
-                    continue;
-                }
-
-                foreach (string subKeyName in key.GetSubKeyNames())
-                {
-                    using RegistryKey? voiceKey = key.OpenSubKey(subKeyName);
-                    names.Add($"{subKeyName} {voiceKey?.GetValue(string.Empty)}");
-                }
-            }
-        }
-
-        int english = names.Count(name => name.Contains("English", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("en-", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("409", StringComparison.OrdinalIgnoreCase));
-        return (names.Count, english);
+        using SpeechSynthesizer synthesizer = new();
+        List<InstalledVoice> voices = synthesizer.GetInstalledVoices()
+            .Where(voice => voice.Enabled)
+            .ToList();
+        int english = voices.Count(voice => string.Equals(
+            voice.VoiceInfo.Culture.TwoLetterISOLanguageName,
+            "en",
+            StringComparison.OrdinalIgnoreCase));
+        return (voices.Count, english);
     }
 }

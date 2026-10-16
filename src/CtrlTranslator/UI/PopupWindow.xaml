@@ -12,6 +12,23 @@
         SizeToContent="Height"
         Opacity="0">
     <Window.Resources>
+        <!-- 窗口控制（钉住 / 关闭）：比左下角那三个内容操作更轻。
+             默认用最淡的三级文字色，悬停才变实并浮出底色 —— 它们是配角，
+             不该和"朗读 / 收藏 / 复制"抢同样的注意力。钉住态给足底色和实心，
+             因为"钉住了没有"必须一眼看得出来，光靠描边颜色太弱。 -->
+        <Style x:Key="WindowControl" TargetType="Button" BasedOn="{StaticResource Button.Ghost}">
+            <Setter Property="Width" Value="26" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="MinHeight" Value="26" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextTertiary}" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
         <Style x:Key="PopupIconPath" TargetType="Path">
             <Setter Property="Width" Value="16" />
             <Setter Property="Height" Value="16" />
@@ -53,15 +70,22 @@
             </DataTemplate.Triggers>
         </DataTemplate>
         <DataTemplate x:Key="IconTemplate.Pin">
-            <Path x:Name="Icon" Style="{StaticResource PopupIconPath}" Data="{DynamicResource Icon.Pin}" />
+            <Border x:Name="Chip" CornerRadius="{DynamicResource Radius.Small}"
+                    Background="{DynamicResource Brush.Transparent}" Padding="4">
+                <Path x:Name="Icon" Style="{StaticResource PopupIconPath}"
+                      Width="14" Height="14" Data="{DynamicResource Icon.Pin}" />
+            </Border>
             <DataTemplate.Triggers>
                 <DataTrigger Binding="{Binding}" Value="pinned">
+                    <Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.AccentSubtle}" />
                     <Setter TargetName="Icon" Property="Stroke" Value="{DynamicResource Brush.Accent}" />
+                    <Setter TargetName="Icon" Property="Fill" Value="{DynamicResource Brush.Accent}" />
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
         <DataTemplate x:Key="IconTemplate.Close">
-            <Path Style="{StaticResource PopupIconPath}" Data="{DynamicResource Icon.Close}" />
+            <Path Style="{StaticResource PopupIconPath}" Width="13" Height="13"
+                  Data="{DynamicResource Icon.Close}" />
         </DataTemplate>
     </Window.Resources>
 
@@ -70,61 +94,85 @@
             BorderBrush="{DynamicResource Brush.BorderStrong}"
             CornerRadius="{DynamicResource Radius.Popup}"
             BorderThickness="1"
-            Padding="18"
-            Effect="{DynamicResource Effect.PopupShadow}">
+            Padding="14,10,14,8"
+            Effect="{DynamicResource Effect.PopupShadow}"
+            MouseLeftButtonDown="Shell_OnMouseLeftButtonDown">
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="36" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <!-- ⚠️ 内容行必须是 *，不能是 Auto。SizeToContent="Height" 撞上 MaxHeight 之后，
+                     Auto 行会按内容的完整高度去要空间，把下面那行操作栏整个顶出可视区
+                     （长译文时底部按钮和元信息直接看不见了）。给 * 之后它只拿剩余空间，
+                     超出的部分由自己的滚动条消化。 -->
+                <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <Grid x:Name="Toolbar" Grid.Row="0" Background="Transparent"
-                  MouseLeftButtonDown="Toolbar_OnMouseLeftButtonDown">
+            <!-- 顶行：原文回显 + 窗口控制。
+                 拖动挂在整个外壳上（见 Shell_OnMouseLeftButtonDown），不再只有这一条 26px
+                 的窄带可拖 —— 那条太细，稍微瞄低一点就落到内容区，表现就是"拖了没反应"。
+                 原文那行放在这里，是因为划词经常划多、划少或划错 —— 译文出来读着不对时，
+                 用户没法判断是模型翻错了还是自己选错了，只能关掉重划。 -->
+            <Grid Grid.Row="0" Background="Transparent">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <Button x:Name="SpeechButton" Grid.Column="0"
-                        Style="{StaticResource Button.Icon}"
-                        AutomationProperties.Name="朗读原文"
-                        Content="speech" ContentTemplate="{StaticResource IconTemplate.Speech}"
-                        ToolTip="朗读原文" Click="SpeechButton_OnClick" />
-                <Button x:Name="StarButton" Grid.Column="1" Margin="4,0,0,0"
-                        Style="{StaticResource Button.Icon}"
-                        AutomationProperties.Name="收藏翻译"
-                        Content="star" ContentTemplate="{StaticResource IconTemplate.Star}"
-                        ToolTip="收藏" Click="StarButton_OnClick" />
-                <Button x:Name="CopyButton" Grid.Column="2" Margin="4,0,0,0"
-                        Style="{StaticResource Button.Icon}"
-                        AutomationProperties.Name="复制译文"
-                        Content="copy" ContentTemplate="{StaticResource IconTemplate.Copy}"
-                        ToolTip="复制译文" Click="CopyButton_OnClick" />
-                <Button x:Name="PinButton" Grid.Column="4"
-                        Style="{StaticResource Button.Icon}"
+                <TextBlock x:Name="SourceEchoText" VerticalAlignment="Center"
+                           Margin="0,0,8,0" TextTrimming="CharacterEllipsis"
+                           FontSize="{DynamicResource Size.BodySmall}"
+                           Foreground="{DynamicResource Brush.TextTertiary}" />
+                <Button x:Name="PinButton" Grid.Column="1" Style="{StaticResource WindowControl}"
                         AutomationProperties.Name="钉住浮窗"
                         Content="pin" ContentTemplate="{StaticResource IconTemplate.Pin}"
-                        ToolTip="钉住" Click="PinButton_OnClick" />
-                <Button Grid.Column="5" Margin="4,0,0,0"
-                        Style="{StaticResource Button.Icon}"
+                        ToolTip="钉住（点开后浮窗不会因为点别处而关闭）" Click="PinButton_OnClick" />
+                <Button Grid.Column="2" Margin="1,0,0,0" Style="{StaticResource WindowControl}"
                         AutomationProperties.Name="关闭浮窗"
                         Content="close" ContentTemplate="{StaticResource IconTemplate.Close}"
                         ToolTip="关闭" Click="CloseButton_OnClick" />
             </Grid>
 
-            <Border Grid.Row="1" Height="1" Margin="0,14"
-                    Background="{DynamicResource Brush.Border}" />
+            <!-- 提示条。从底部一大块改成顶部一条细的：它原本比要提示的内容还显眼，本末倒置。 -->
+            <Border x:Name="NoticeBorder" Grid.Row="1" Margin="0,10,0,0" Padding="10,7"
+                    CornerRadius="{DynamicResource Radius.Small}" Visibility="Collapsed">
+                <DockPanel LastChildFill="True">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="10,0,0,0">
+                        <Button x:Name="DisableThinkingButton" Margin="0,0,4,0" MinHeight="26"
+                                Padding="10,0" Style="{StaticResource Button.Secondary}"
+                                FontSize="{DynamicResource Size.BodySmall}"
+                                Content="关闭思考模式" Visibility="Collapsed"
+                                Click="DisableThinkingButton_OnClick" />
+                        <Button x:Name="NoticeActionButton" Margin="0,0,4,0" MinHeight="26"
+                                Padding="10,0" Style="{StaticResource Button.Secondary}"
+                                FontSize="{DynamicResource Size.BodySmall}"
+                                Click="NoticeActionButton_OnClick" />
+                        <Button x:Name="NoticeDismissButton" MinHeight="26" Padding="8,0"
+                                Style="{StaticResource Button.Ghost}"
+                                FontSize="{DynamicResource Size.BodySmall}"
+                                Content="关闭提示" Visibility="Collapsed"
+                                Click="NoticeDismissButton_OnClick" />
+                    </StackPanel>
+                    <Path x:Name="NoticeIcon" DockPanel.Dock="Left" Width="14" Height="14"
+                          Margin="0,1,8,0" VerticalAlignment="Center" Stretch="Uniform"
+                          StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                          StrokeLineJoin="Round" />
+                    <TextBlock x:Name="NoticeText" TextWrapping="Wrap" VerticalAlignment="Center"
+                               FontSize="{DynamicResource Size.BodySmall}" />
+                </DockPanel>
+            </Border>
 
-            <Grid Grid.Row="2">
+            <TextBlock x:Name="FallbackNoticeText" Grid.Row="2" Margin="0,8,0,0"
+                       Visibility="Collapsed" TextWrapping="Wrap"
+                       FontSize="{DynamicResource Size.Caption}"
+                       Foreground="{DynamicResource Brush.TextTertiary}" />
+
+            <Grid Grid.Row="3" Margin="0,8,0,0">
                 <StackPanel x:Name="LoadingPanel" Orientation="Horizontal"
-                            HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10,8">
-                    <Viewbox Width="16" Height="16" Margin="0,0,10,0">
+                            HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,4">
+                    <Viewbox Width="15" Height="15" Margin="0,0,10,0">
                         <Path Data="M8,1.25 A6.75,6.75 0 1 1 3.23,3.23"
                               Stroke="{DynamicResource Brush.Primary}"
                               StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
@@ -143,6 +191,7 @@
                         </Path>
                     </Viewbox>
                     <TextBlock x:Name="LoadingText" VerticalAlignment="Center"
+                               FontSize="{DynamicResource Size.BodySmall}"
                                Foreground="{DynamicResource Brush.TextSecondary}"
                                Text="翻译中… 0.0 秒" />
                 </StackPanel>
@@ -156,34 +205,37 @@
                                           IsToolBarVisible="False" />
             </Grid>
 
-            <!-- 降级提示：只占一行，平时折叠，不影响任何既有布局与拖动行为。 -->
-            <TextBlock x:Name="FallbackNoticeText" Grid.Row="3" Margin="0,10,0,0"
-                       Visibility="Collapsed" TextWrapping="Wrap"
-                       FontSize="{DynamicResource Size.Caption}"
-                       Foreground="{DynamicResource Brush.TextTertiary}" />
-
-            <Border x:Name="NoticeBorder" Grid.Row="4" Margin="0,14,0,0" Padding="14"
-                    CornerRadius="{DynamicResource Radius.Large}" Visibility="Collapsed">
-                <DockPanel LastChildFill="True">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
-                        <Button x:Name="DisableThinkingButton" Margin="0,0,4,0"
-                                Style="{StaticResource Button.Primary}"
-                                Content="关闭思考模式" Visibility="Collapsed"
-                                Click="DisableThinkingButton_OnClick" />
-                        <Button x:Name="NoticeActionButton" Margin="0,0,4,0"
-                                Style="{StaticResource Button.Secondary}"
-                                Click="NoticeActionButton_OnClick" />
-                        <Button x:Name="NoticeDismissButton" Style="{StaticResource Button.Ghost}"
-                                Content="关闭提示" Visibility="Collapsed"
-                                Click="NoticeDismissButton_OnClick" />
-                    </StackPanel>
-                    <Path x:Name="NoticeIcon" DockPanel.Dock="Left" Width="16" Height="16"
-                          Margin="0,1,8,0" VerticalAlignment="Top" Stretch="Uniform"
-                          StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                          StrokeLineJoin="Round" />
-                    <TextBlock x:Name="NoticeText" TextWrapping="Wrap" VerticalAlignment="Center" />
-                </DockPanel>
-            </Border>
+            <!-- 底部：对内容的操作 + 这次是谁翻的。
+                 朗读 / 收藏 / 复制 从顶部挪下来 —— 它们是对译文的操作，该跟着内容走；
+                 顶部只留钉住和关闭这两个真正的窗口控制，第一眼落点才是原文和译文。 -->
+            <Grid Grid.Row="4" Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="SpeechButton" Width="24" Height="24" MinHeight="24"
+                            Style="{StaticResource Button.Icon}"
+                            AutomationProperties.Name="朗读原文"
+                            Content="speech" ContentTemplate="{StaticResource IconTemplate.Speech}"
+                            ToolTip="朗读原文" Click="SpeechButton_OnClick" />
+                    <Button x:Name="StarButton" Width="24" Height="24" MinHeight="24" Margin="2,0,0,0"
+                            Style="{StaticResource Button.Icon}"
+                            AutomationProperties.Name="收藏翻译"
+                            Content="star" ContentTemplate="{StaticResource IconTemplate.Star}"
+                            ToolTip="收藏" Click="StarButton_OnClick" />
+                    <Button x:Name="CopyButton" Width="24" Height="24" MinHeight="24" Margin="2,0,0,0"
+                            Style="{StaticResource Button.Icon}"
+                            AutomationProperties.Name="复制译文"
+                            Content="copy" ContentTemplate="{StaticResource IconTemplate.Copy}"
+                            ToolTip="复制译文" Click="CopyButton_OnClick" />
+                </StackPanel>
+                <TextBlock x:Name="MetaText" Grid.Column="1" Margin="10,0,0,0"
+                           HorizontalAlignment="Right" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           FontSize="{DynamicResource Size.Caption}"
+                           Foreground="{DynamicResource Brush.TextTertiary}" />
+            </Grid>
         </Grid>
     </Border>
 </Window>

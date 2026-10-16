@@ -1,4 +1,3 @@
-using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 
@@ -52,43 +51,25 @@ public static class FailoverPolicy
         return new FailoverDecision(FailoverVerdict.Fatal, null);
     }
 
+    /// <summary>
+    /// 归类交给 <see cref="ApiErrorClassifier"/>（浮窗报错用的也是它），这里只决定怎么处置。
+    /// </summary>
+    /// <remarks>
+    /// 只有"你不动手它永远好不了"的三类才标记失效。地址 404（多半是路径写错，但也可能是
+    /// 服务商临时下线了某个入口）、地区限制、内容审核、限流、5xx、其余 4xx 都只切一次备用 ——
+    /// 宁可多试一次，也不要凭一个拿不准的报文把档案永久判死。
+    /// </remarks>
     private static FailoverDecision ClassifyApiException(ApiHttpException exception, string model)
     {
-        int code = (int)exception.StatusCode;
-        string body = exception.ResponseBody;
-
-        if (exception.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        return exception.Kind switch
         {
-            return Persistent("API Key 无效或已过期");
-        }
-
-        if (exception.StatusCode == HttpStatusCode.PaymentRequired
-            || ContainsAny(body, "insufficient", "balance", "quota"))
-        {
-            return Persistent("账户余额不足或额度已用完");
-        }
-
-        if (exception.StatusCode == HttpStatusCode.NotFound
-            || (body.Contains("model", StringComparison.OrdinalIgnoreCase)
-                && ContainsAny(body, "not found", "does not exist")))
-        {
-            return Persistent($"模型「{model}」在这个服务商不存在");
-        }
-
-        if (exception.StatusCode == HttpStatusCode.TooManyRequests || code >= 500)
-        {
-            return new FailoverDecision(FailoverVerdict.Transient, null);
-        }
-
-        // 其余 4xx 含义不明。宁可只切一次备用，也不要凭一个看不懂的状态码把档案永久判死。
-        return new FailoverDecision(FailoverVerdict.Transient, null);
+            ApiErrorKind.Authentication => Persistent("API Key 无效或已过期"),
+            ApiErrorKind.Balance => Persistent("账户余额不足或额度已用完"),
+            ApiErrorKind.ModelNotFound => Persistent($"模型「{model}」在这个服务商不存在"),
+            _ => new FailoverDecision(FailoverVerdict.Transient, null)
+        };
     }
 
     private static FailoverDecision Persistent(string reason) =>
         new(FailoverVerdict.Persistent, reason);
-
-    private static bool ContainsAny(string value, params string[] candidates)
-    {
-        return candidates.Any(candidate => value.Contains(candidate, StringComparison.OrdinalIgnoreCase));
-    }
 }

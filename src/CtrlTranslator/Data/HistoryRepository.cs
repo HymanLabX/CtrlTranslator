@@ -1,4 +1,5 @@
 using System.Globalization;
+using CtrlTranslator.Diagnostics;
 using Microsoft.Data.Sqlite;
 
 namespace CtrlTranslator.Data;
@@ -48,10 +49,14 @@ public sealed class HistoryRepository
             return null;
         }
 
-        record.CreatedAt = DateTime.Now;
+        // 只更新"最后一次用到"的时间，不动 created_at。
+        // created_at 是这条翻译真实发生的时刻，历史列表的排序、显示和 CSV 导出都以它为准；
+        // 一旦被缓存命中改写，用户看到的时间就是错的，而且原值再也找不回来。
         await using SqliteCommand touch = connection.CreateCommand();
-        touch.CommandText = "UPDATE translations SET created_at = $created_at WHERE id = $id;";
-        touch.Parameters.AddWithValue("$created_at", record.CreatedAt.ToString("O", CultureInfo.InvariantCulture));
+        touch.CommandText = "UPDATE translations SET last_used_at = $last_used_at WHERE id = $id;";
+        touch.Parameters.AddWithValue(
+            "$last_used_at",
+            DateTime.Now.ToString("O", CultureInfo.InvariantCulture));
         touch.Parameters.AddWithValue("$id", record.Id);
         await touch.ExecuteNonQueryAsync(cancellationToken);
         return record;
@@ -79,6 +84,25 @@ public sealed class HistoryRepository
         AddRecordParameters(command, record);
         object? result = await command.ExecuteScalarAsync(cancellationToken);
         return Convert.ToInt64(result, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>按编号取一条记录；不存在时返回 null。主窗口用它把刚翻译出来的那条插到列表顶部。</summary>
+    public async Task<TranslationRecord?> GetAsync(long id, CancellationToken cancellationToken)
+    {
+        await using SqliteConnection connection = _database.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, cache_key, source_text, result_text, target_lang, mode_id,
+                   model, is_word, starred, app_name, latency_ms, created_at,
+                   profile_name, prompt_tokens, completion_tokens
+              FROM translations
+             WHERE id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", id);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadRecord(reader) : null;
     }
 
     public async Task SetStarredAsync(long id, bool starred, CancellationToken cancellationToken)
@@ -232,11 +256,23 @@ public sealed class HistoryRepository
 
     /// <summary>
     /// 只删除未收藏的记录。SPEC §7.4：星标收藏是用户攒的生词本，任何清理操作都不得删除。
-    /// v1.0 刻意不提供批量删除收藏的入口，收藏只能在主窗口逐条右键删除。
+    /// 刻意不提供批量删除收藏的入口，收藏只能在主窗口的记录卡片上逐条删除。
     /// </summary>
     public async Task ClearNonStarredAsync(CancellationToken cancellationToken)
     {
         await ExecuteDeleteAsync("DELETE FROM translations WHERE starred = 0;", cancellationToken);
+
+        // SQLite 删记录只是把那几页标成"可复用"，原文译文的字节还躺在文件里，
+        // 用工具打开 history.db 照样翻得出来。用户点「清空」就是要它没了，所以顺手压实一次。
+        // 压实失败不影响"已删除"这个结果，只记日志。
+        try
+        {
+            await ExecuteDeleteAsync("VACUUM;", cancellationToken);
+        }
+        catch (SqliteException exception)
+        {
+            Logger.Warning("数据库", $"清空后压实数据库文件失败，记录已删除，不影响使用：{exception.Message}");
+        }
     }
 
     private async Task ExecuteDeleteAsync(string commandText, CancellationToken cancellationToken)
@@ -288,10 +324,14 @@ public sealed class HistoryRepository
             Starred = reader.GetInt64(8) != 0,
             AppName = reader.IsDBNull(9) ? null : reader.GetString(9),
             LatencyMilliseconds = reader.IsDBNull(10) ? null : reader.GetInt64(10),
-            CreatedAt = DateTime.Parse(
+            // 时间读不懂（比如被别的工具改过）就当作很早以前，别让一条坏记录把整页历史都读挂。
+            CreatedAt = DateTime.TryParse(
                 reader.GetString(11),
                 CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind),
+                DateTimeStyles.RoundtripKind,
+                out DateTime createdAt)
+                ? createdAt
+                : DateTime.MinValue,
             ProfileName = reader.IsDBNull(12) ? null : reader.GetString(12),
             PromptTokens = reader.IsDBNull(13) ? null : reader.GetInt64(13),
             CompletionTokens = reader.IsDBNull(14) ? null : reader.GetInt64(14)

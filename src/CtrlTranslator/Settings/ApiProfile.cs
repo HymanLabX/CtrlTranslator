@@ -56,11 +56,25 @@ public sealed class ApiProfile
     public bool IsFailed => !string.IsNullOrWhiteSpace(FailureReason);
 
     /// <summary>
-    /// 三要素齐全才算配置完整。本地 Ollama 允许不填 Key，故 Key 不参与判断。
+    /// 地址和模型齐全、且（不是本机服务时）填了 Key，才算配置完整。
     /// </summary>
     [JsonIgnore]
     public bool IsConfigured =>
-        !string.IsNullOrWhiteSpace(BaseUrl) && !string.IsNullOrWhiteSpace(Model);
+        !string.IsNullOrWhiteSpace(BaseUrl)
+        && !string.IsNullOrWhiteSpace(Model)
+        && (!string.IsNullOrWhiteSpace(ApiKey) || IsLocalAddress(BaseUrl));
+
+    /// <summary>
+    /// 是不是本机上的服务（localhost / 127.x / ::1）。本地 Ollama 这类服务不需要 API Key。
+    /// </summary>
+    /// <remarks>
+    /// 只认回环地址，不认局域网地址：局域网里的服务可能是别人架的、要 Key 的，
+    /// 漏填 Key 时应该照常提示"还没配置"，而不是发出去吃一个 401。
+    /// </remarks>
+    public static bool IsLocalAddress(string? baseUrl)
+    {
+        return Uri.TryCreate(baseUrl?.Trim(), UriKind.Absolute, out Uri? uri) && uri.IsLoopback;
+    }
 
     public static ApiProfile CreateFromPreset(string presetName, string profileName)
     {

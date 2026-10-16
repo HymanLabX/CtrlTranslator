@@ -15,3 +15,6 @@ installer/output/
 
 # 本机临时文件
 hello-test.txt
+
+# 浏览器自动化工具留下的截图与快照（做界面时的临时产物）
+.playwright-mcp/

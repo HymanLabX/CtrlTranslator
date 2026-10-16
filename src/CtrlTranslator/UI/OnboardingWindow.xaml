@@ -1,4 +1,4 @@
-<Window x:Class="CtrlTranslator.UI.OnboardingWindow"
+﻿<Window x:Class="CtrlTranslator.UI.OnboardingWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="欢迎使用 CtrlTranslator" Width="760" Height="640"
@@ -16,6 +16,122 @@
             <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="Margin" Value="0,0,0,22" />
         </Style>
+        <!-- 步骤状态行。左栏本来就是竖栏，原来却只用来放一条写死满格的 3px 横条
+             和一句「第 N / 4 步」—— 那条横条没有 x:Name，ShowStep 从头到尾碰不到它，
+             第 1 步满格、第 4 步还是满格，是个主动给错信号的假进度条。
+             换成四个有名字的步骤，沿用设置目录列的选中语言（白色抬起 + 绿色左条 + 半粗）。 -->
+        <DataTemplate x:Key="StepItemTemplate">
+            <Border x:Name="Shell" MinHeight="34" Margin="0,0,0,3"
+                    Background="{DynamicResource Brush.Transparent}"
+                    BorderBrush="{DynamicResource Brush.Transparent}" BorderThickness="1"
+                    CornerRadius="{DynamicResource Radius.Small}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="3" />
+                        <ColumnDefinition Width="24" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border x:Name="AccentBar" Margin="0,7" CornerRadius="0,2,2,0"
+                            Background="{DynamicResource Brush.Transparent}" />
+                    <Path x:Name="Marker" Grid.Column="1" Margin="9,0,0,0"
+                          Width="15" Height="15" VerticalAlignment="Center" Stretch="Uniform"
+                          Data="{DynamicResource Icon.Circle}"
+                          Stroke="{DynamicResource Brush.BorderStrong}"
+                          Fill="{DynamicResource Brush.Transparent}"
+                          StrokeThickness="1.5" StrokeStartLineCap="Round"
+                          StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                    <TextBlock x:Name="Label" Grid.Column="2" Margin="6,0,10,0"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                               Foreground="{DynamicResource Brush.TextTertiary}"
+                               Text="{Binding Name}" />
+                </Grid>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding State}" Value="done">
+                    <Setter TargetName="Marker" Property="Data" Value="{DynamicResource Icon.Check}" />
+                    <Setter TargetName="Marker" Property="Stroke" Value="{DynamicResource Brush.Success}" />
+                    <Setter TargetName="Marker" Property="StrokeThickness" Value="1.8" />
+                    <Setter TargetName="Label" Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding State}" Value="current">
+                    <Setter TargetName="Marker" Property="Data" Value="{DynamicResource Icon.Dot}" />
+                    <Setter TargetName="Marker" Property="Stroke" Value="{DynamicResource Brush.Text}" />
+                    <Setter TargetName="Marker" Property="Fill" Value="{DynamicResource Brush.Text}" />
+                    <Setter TargetName="Shell" Property="Background" Value="{DynamicResource Brush.Surface}" />
+                    <Setter TargetName="Shell" Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+                    <Setter TargetName="AccentBar" Property="Background" Value="{DynamicResource Brush.AccentSecondary}" />
+                    <Setter TargetName="Label" Property="Foreground" Value="{DynamicResource Brush.Text}" />
+                    <Setter TargetName="Label" Property="FontWeight" Value="SemiBold" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <!-- 服务商卡片。原来是个原生 ListBox 加边框，可同样这八个服务商，
+             用户在「设置 → 翻译模型」里看到的是卡片 —— 同一批东西两副面孔。
+             这里跟档案卡对齐：等分列、绿色左条表示选中。 -->
+        <Style x:Key="ProviderCard" TargetType="ListBoxItem">
+            <Setter Property="Height" Value="68" />
+            <Setter Property="Margin" Value="0,0,10,10" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Shell" Background="{DynamicResource Brush.Surface}"
+                                BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
+                                CornerRadius="{DynamicResource Radius.Medium}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="3" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border x:Name="AccentBar" Margin="0,10" CornerRadius="0,2,2,0"
+                                        Background="{DynamicResource Brush.Transparent}" />
+                                <ContentPresenter Grid.Column="1" Margin="11,0,13,0"
+                                                  VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Shell" Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Shell" Property="BorderBrush" Value="{DynamicResource Brush.Accent}" />
+                                <Setter TargetName="AccentBar" Property="Background" Value="{DynamicResource Brush.AccentSecondary}" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Shell" Property="BorderBrush" Value="{DynamicResource Brush.Accent}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <DataTemplate x:Key="ProviderCardTemplate">
+            <StackPanel>
+                <DockPanel>
+                    <!-- 「申请 Key」做成弱化的文字按钮：它是卡片里的次要动作，
+                         不该长得跟页脚那些实心按钮一样重。 -->
+                    <Button DockPanel.Dock="Right" Margin="8,0,-6,0" MinHeight="22" Padding="6,0"
+                            Style="{StaticResource Button.Ghost}"
+                            FontSize="{DynamicResource Size.BodySmall}"
+                            Foreground="{DynamicResource Brush.AccentSecondary}"
+                            Content="申请 Key" Tag="{Binding KeyUrl}"
+                            Visibility="{Binding KeyButtonVisibility}"
+                            Click="OpenProviderWebsite_OnClick" />
+                    <TextBlock FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                               Text="{Binding Name}" />
+                </DockPanel>
+                <TextBlock Margin="0,3,0,0" TextTrimming="CharacterEllipsis"
+                           FontSize="{DynamicResource Size.BodySmall}"
+                           Foreground="{DynamicResource Brush.TextTertiary}"
+                           Text="{Binding Description}" />
+            </StackPanel>
+        </DataTemplate>
+
         <DataTemplate x:Key="DiagnosticItemTemplate">
             <Grid Margin="0,5">
                 <Grid.ColumnDefinitions>
@@ -50,73 +166,76 @@
 
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="184" />
+            <ColumnDefinition Width="180" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <Border Background="{DynamicResource Brush.SurfaceSubtle}"
-                BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,1,0"
-                Padding="24,28">
+        <!-- 一级导航的那套底色和分界：NavPrimary + BorderStrong。
+             原来是 SurfaceSubtle + Border，和右边纯白内容区差得太少，肉眼分不出两块区域 ——
+             主窗口侧栏当初就是因为这个才换的，引导窗只是没跟着改。 -->
+        <Border Background="{DynamicResource Brush.NavPrimary}"
+                BorderBrush="{DynamicResource Brush.BorderStrong}" BorderThickness="0,0,1,0"
+                Padding="10,24">
             <Grid>
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <StackPanel>
+
+                <!-- 左边距 12 = 3px 选中条 + 9px 间距，让品牌图标和下面的步骤图标落在同一条左边线上。 -->
+                <StackPanel Margin="12,0,10,20">
                     <StackPanel Orientation="Horizontal">
-                        <Image Width="28" Height="28" VerticalAlignment="Center"
+                        <Image Width="24" Height="24" VerticalAlignment="Center"
                                Source="pack://application:,,,/Assets/ctrltranslator.ico"
                                AutomationProperties.Name="CtrlTranslator 程序图标" />
-                        <TextBlock Margin="8,0,0,0" VerticalAlignment="Center"
-                                   FontFamily="{DynamicResource Font.Display}" FontSize="15"
+                        <TextBlock Margin="9,0,0,0" VerticalAlignment="Center"
+                                   FontFamily="{DynamicResource Font.Display}"
+                                   FontSize="{DynamicResource Size.BodyLarge}"
                                    FontWeight="SemiBold" Text="CtrlTranslator" />
                     </StackPanel>
-                    <TextBlock Margin="0,8,0,0" Foreground="{DynamicResource Brush.TextTertiary}"
-                               FontSize="{DynamicResource Size.BodySmall}" Text="让阅读不中断" />
                 </StackPanel>
 
-                <StackPanel Grid.Row="1" VerticalAlignment="Center">
-                    <Border Height="3" Margin="0,0,0,14" Background="{DynamicResource Brush.Primary}"
-                            CornerRadius="2" />
-                    <TextBlock x:Name="StepText" FontSize="{DynamicResource Size.Title}"
-                               FontWeight="SemiBold" Text="第 1 / 4 步" />
-                    <TextBlock Margin="0,7,0,0" Foreground="{DynamicResource Brush.TextSecondary}"
-                               FontSize="{DynamicResource Size.BodySmall}" TextWrapping="Wrap"
-                               Text="只需几分钟，完成后即可在任意程序中划词翻译。" />
-                </StackPanel>
+                <TextBlock x:Name="StepText" Grid.Row="1" Margin="12,0,10,8"
+                           FontSize="{DynamicResource Size.Caption}"
+                           Foreground="{DynamicResource Brush.TextTertiary}" Text="第 1 / 4 步" />
 
-                <TextBlock Grid.Row="2" Foreground="{DynamicResource Brush.TextTertiary}"
+                <ItemsControl x:Name="StepList" Grid.Row="2"
+                              ItemTemplate="{StaticResource StepItemTemplate}" />
+
+                <TextBlock Grid.Row="3" Margin="12,0,10,0"
+                           Foreground="{DynamicResource Brush.TextTertiary}"
                            FontSize="{DynamicResource Size.Caption}" TextWrapping="Wrap"
                            Text="API Key 使用 Windows 账户加密，仅保存在本机。" />
             </Grid>
         </Border>
 
+        <!-- 原来这里顶着一个 12px 绿色半粗的「初次设置」小眉标，压在 30px 大标题上方。
+             那是西文的「小写灰色眉标」写法，靠大写加字距立得住；中文没有大小写，学不来。
+             何况左栏已经说清楚你在初次设置里了。 -->
         <Grid Grid.Column="1" Margin="32,28,32,24">
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <TextBlock FontFamily="{DynamicResource Font.Display}"
-                       FontSize="{DynamicResource Size.BodySmall}"
-                       Foreground="{DynamicResource Brush.AccentSecondary}"
-                       FontWeight="SemiBold" Text="初次设置" />
-
-            <Grid Grid.Row="1" Margin="0,18,0,18">
+            <Grid Margin="0,0,0,18">
                 <StackPanel x:Name="WelcomePage" VerticalAlignment="Center">
                     <TextBlock Style="{StaticResource PageTitle}" FontSize="{DynamicResource Size.Display}"
                                TextWrapping="Wrap" Text="选中，双击，立刻读懂" />
                     <TextBlock Style="{StaticResource PageCaption}"
                                Text="CtrlTranslator 在鼠标旁直接呈现译文，不切换窗口，也不打断你的阅读节奏。" />
-                    <Border Padding="20" Background="{DynamicResource Brush.SurfaceRaised}"
-                            BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
+                    <!-- 窗口底和 SurfaceRaised 都是 #FFFFFF，白卡叠白底只剩两圈边框在撑结构 ——
+                         设置页当初就是这个毛病。改成 SurfaceSubtle 填充，里面的数字块反过来用白底描边。 -->
+                    <Border Padding="20" Background="{DynamicResource Brush.SurfaceSubtle}"
+                            BorderBrush="{DynamicResource Brush.BorderSoft}" BorderThickness="1"
                             CornerRadius="{DynamicResource Radius.Large}">
                         <StackPanel>
                             <Grid Margin="0,0,0,12">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="40" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                <Border Width="32" Height="32" Background="{DynamicResource Brush.AccentSubtle}"
+                                <Border Width="32" Height="32" Background="{DynamicResource Brush.Surface}"
+                                        BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
                                         CornerRadius="{DynamicResource Radius.Small}">
                                     <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
                                                Foreground="{DynamicResource Brush.Accent}" FontWeight="SemiBold" Text="01" />
@@ -125,7 +244,8 @@
                             </Grid>
                             <Grid Margin="0,0,0,12">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="40" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                <Border Width="32" Height="32" Background="{DynamicResource Brush.AccentSubtle}"
+                                <Border Width="32" Height="32" Background="{DynamicResource Brush.Surface}"
+                                        BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
                                         CornerRadius="{DynamicResource Radius.Small}">
                                     <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
                                                Foreground="{DynamicResource Brush.Accent}" FontWeight="SemiBold" Text="02" />
@@ -134,7 +254,8 @@
                             </Grid>
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="40" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                <Border Width="32" Height="32" Background="{DynamicResource Brush.AccentSubtle}"
+                                <Border Width="32" Height="32" Background="{DynamicResource Brush.Surface}"
+                                        BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
                                         CornerRadius="{DynamicResource Radius.Small}">
                                     <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
                                                Foreground="{DynamicResource Brush.Accent}" FontWeight="SemiBold" Text="03" />
@@ -156,25 +277,16 @@
                         <TextBlock Style="{StaticResource PageCaption}" Margin="0,0,0,8"
                                    Text="选择你已经拥有 API Key 的服务。以后还能在设置中添加备用服务商。" />
                     </StackPanel>
-                    <ListBox x:Name="ProviderList" Grid.Row="1" Margin="0,10"
-                             Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.Border}"
-                             BorderThickness="1" SelectionChanged="ProviderList_OnSelectionChanged">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <Grid Margin="12,10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="128" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
-                                    <TextBlock Grid.Column="1" Margin="12,0" Foreground="{DynamicResource Brush.TextSecondary}"
-                                               TextTrimming="CharacterEllipsis" Text="{Binding Description}" />
-                                    <Button Grid.Column="2" Content="申请 Key" Tag="{Binding KeyUrl}"
-                                            Visibility="{Binding KeyButtonVisibility}" Click="OpenProviderWebsite_OnClick" />
-                                </Grid>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
+                    <ListBox x:Name="ProviderList" Grid.Row="1" Margin="0,10,-10,10"
+                             BorderThickness="0" Padding="0"
+                             Background="{DynamicResource Brush.Transparent}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ItemContainerStyle="{StaticResource ProviderCard}"
+                             ItemTemplate="{StaticResource ProviderCardTemplate}"
+                             SelectionChanged="ProviderList_OnSelectionChanged">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate><UniformGrid Columns="2" /></ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
                     </ListBox>
                     <Border Grid.Row="2" Padding="12" Background="{DynamicResource Brush.WarningBg}"
                             BorderBrush="{DynamicResource Brush.Warning}" BorderThickness="1"
@@ -287,11 +399,11 @@
                 </Grid>
             </Grid>
 
-            <DockPanel Grid.Row="2">
+            <DockPanel Grid.Row="1">
                 <Button x:Name="SkipButton" Style="{StaticResource Button.Ghost}"
                         Content="暂时跳过" Click="SkipButton_OnClick" />
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <Button x:Name="BackButton" Width="96" Margin="0,0,10,0"
+                    <Button x:Name="BackButton" Width="112" Margin="0,0,10,0"
                             Content="上一步" IsEnabled="False" Click="BackButton_OnClick" />
                     <Button x:Name="NextButton" Width="112" Style="{StaticResource Button.Primary}"
                             Content="下一步" Click="NextButton_OnClick" />

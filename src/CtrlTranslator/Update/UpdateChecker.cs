@@ -27,6 +27,29 @@ public sealed record ReleaseInfo(
     public double SetupSizeMb => Math.Round(SetupSizeBytes / 1024d / 1024d, 1);
 }
 
+/// <summary>一次检查更新的结论。</summary>
+public enum UpdateCheckStatus
+{
+    /// <summary>有可以安装的新版本。</summary>
+    UpdateAvailable,
+
+    /// <summary>已经是最新版本。</summary>
+    UpToDate,
+
+    /// <summary>查不到任何正式发布（仓库不存在、改成了私有、或者还没发过版）。</summary>
+    NoRelease,
+
+    /// <summary>没查成（网络不通、GitHub 报错、发布内容不完整）。</summary>
+    Failed
+}
+
+/// <summary>
+/// 检查更新的结果。以前只有"有新版本 / null"两种，于是"连不上 GitHub""仓库没了"
+/// 在设置页上统统显示成「已经是最新版本」—— 这是一句假话。
+/// </summary>
+/// <param name="Detail">没查成时的原因，写给用户看的人话。</param>
+public sealed record UpdateCheckResult(UpdateCheckStatus Status, ReleaseInfo? Release = null, string? Detail = null);
+
 /// <summary>
 /// 查 GitHub Releases 有没有新版本。
 /// </summary>
@@ -61,9 +84,9 @@ public static partial class UpdateChecker
         System.Reflection.Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0, 0));
 
     /// <summary>
-    /// 返回比当前版本新的发布；没有新版本、拉取失败或产物不齐全时返回 null。
+    /// 查 GitHub 上的最新正式发布，告诉调用方是"有新版 / 已最新 / 查不到发布 / 没查成"中的哪一种。
     /// </summary>
-    public static async Task<ReleaseInfo?> CheckAsync(CancellationToken cancellationToken)
+    public static async Task<UpdateCheckResult> CheckAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -73,14 +96,17 @@ public static partial class UpdateChecker
                 cancellationToken);
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
-                Logger.Info("自动更新", "仓库还没有正式发布版本，跳过本次检查。");
-                return null;
+                // 404 有两种可能：仓库在但还没发过正式版，或者仓库本身不存在 / 变成了私有。
+                Logger.Info("自动更新", "查不到正式发布（仓库还没发过版，或仓库不存在、不是公开的），跳过本次检查。");
+                return new UpdateCheckResult(UpdateCheckStatus.NoRelease);
             }
 
             if (!response.IsSuccessStatusCode)
             {
                 Logger.Warning("自动更新", $"检查更新失败，GitHub 返回 HTTP {(int)response.StatusCode}。");
-                return null;
+                return new UpdateCheckResult(
+                    UpdateCheckStatus.Failed,
+                    Detail: $"GitHub 返回了错误（HTTP {(int)response.StatusCode}）");
             }
 
             string body = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -93,12 +119,12 @@ public static partial class UpdateChecker
         catch (Exception exception)
         {
             // 连不上 GitHub 是常态（没挂代理、网络抖动），不值得打扰用户，记一行日志即可。
-            Logger.Info("自动更新", $"检查更新没有完成：{exception.Message}");
-            return null;
+            Logger.Info("自动更新", $"检查更新没有完成：{Logger.Describe(exception)}");
+            return new UpdateCheckResult(UpdateCheckStatus.Failed, Detail: "连不上 GitHub");
         }
     }
 
-    private static ReleaseInfo? ParseRelease(string json)
+    private static UpdateCheckResult ParseRelease(string json)
     {
         using JsonDocument document = JsonDocument.Parse(json);
         JsonElement root = document.RootElement;
@@ -108,19 +134,19 @@ public static partial class UpdateChecker
         if (version is null)
         {
             Logger.Warning("自动更新", $"看不懂的版本号「{tag}」，跳过本次检查。");
-            return null;
+            return new UpdateCheckResult(UpdateCheckStatus.Failed, Detail: $"最新发布的版本号「{tag}」认不出来");
         }
 
         if (version <= CurrentVersion)
         {
             Logger.Info("自动更新", $"已经是最新版本（本地 {CurrentVersion}，线上 {version}）。");
-            return null;
+            return new UpdateCheckResult(UpdateCheckStatus.UpToDate);
         }
 
         if (!root.TryGetProperty("assets", out JsonElement assets) || assets.ValueKind != JsonValueKind.Array)
         {
             Logger.Warning("自动更新", "这个 Release 没有任何产物，跳过。");
-            return null;
+            return new UpdateCheckResult(UpdateCheckStatus.Failed, Detail: $"新版本 {tag} 没有附带安装包");
         }
 
         string? setupName = null;
@@ -155,7 +181,7 @@ public static partial class UpdateChecker
         if (setupName is null || setupUrl is null)
         {
             Logger.Warning("自动更新", $"Release {tag} 里没有安装包，已跳过。");
-            return null;
+            return new UpdateCheckResult(UpdateCheckStatus.Failed, Detail: $"新版本 {tag} 没有附带安装包");
         }
 
         // 拿不到摘要就不更新。宁可不更新，也不下载并执行一个无从验证的 exe ——
@@ -165,19 +191,23 @@ public static partial class UpdateChecker
             Logger.Warning(
                 "自动更新",
                 $"Release {tag} 的安装包没有可用的 digest 摘要，无法校验，已跳过。");
-            return null;
+            return new UpdateCheckResult(
+                UpdateCheckStatus.Failed,
+                Detail: $"新版本 {tag} 缺少校验值，为了安全没有安装");
         }
 
-        return new ReleaseInfo(
-            tag,
-            version,
-            ReadString(root, "name") ?? tag,
-            ReadString(root, "body") ?? string.Empty,
-            setupName,
-            setupUrl,
-            setupSize,
-            expectedSha256,
-            ReadString(root, "html_url") ?? ReleasesPageUrl);
+        return new UpdateCheckResult(
+            UpdateCheckStatus.UpdateAvailable,
+            new ReleaseInfo(
+                tag,
+                version,
+                ReadString(root, "name") ?? tag,
+                ReadString(root, "body") ?? string.Empty,
+                setupName,
+                setupUrl,
+                setupSize,
+                expectedSha256,
+                ReadString(root, "html_url") ?? ReleasesPageUrl));
     }
 
     internal static Version? ParseVersion(string tag)
