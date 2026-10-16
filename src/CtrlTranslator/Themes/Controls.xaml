@@ -363,13 +363,23 @@
                                 CornerRadius="{DynamicResource Radius.Small}">
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="36" /></Grid.ColumnDefinitions>
+                                <!-- 接上 HorizontalContentAlignment：原来模板没接，
+                                     外面怎么设都是左对齐，短值（如「Ctrl」）没法居中。 -->
                                 <ContentPresenter x:Name="SelectionContent" Margin="{TemplateBinding Padding}"
                                                   VerticalAlignment="Center" IsHitTestVisible="False"
+                                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                                   Content="{TemplateBinding SelectionBoxItem}"
                                                   ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" />
+                                <!-- ⚠️ MinHeight="0" 不能删。这个内嵌 TextBox 会吃到上面那条
+                                     TargetType="{x:Type TextBox}" 的隐式样式，跟着拿到 MinHeight="40"；
+                                     Visibility="Hidden" 的元素照样参与布局，于是不管外面把 ComboBox 的
+                                     MinHeight 调到多少，下拉框都被这个隐形的 40 顶着下不来 ——
+                                     表现就是"同一行里下拉框比输入框高一截"。顺手改成 Collapsed，
+                                     不可编辑的下拉框连量都不用量。 -->
                                 <TextBox x:Name="PART_EditableTextBox" Margin="{TemplateBinding Padding}"
                                          Background="{DynamicResource Brush.Transparent}" BorderThickness="0"
-                                         Padding="0" Visibility="Hidden" VerticalContentAlignment="Center"
+                                         Padding="0" MinHeight="0" Visibility="Collapsed"
+                                         VerticalContentAlignment="Center"
                                          Text="{Binding Text, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" />
                                 <ToggleButton Grid.Column="1" Focusable="False" ClickMode="Press"
                                               Template="{StaticResource ComboToggle.Template}"
@@ -388,6 +398,13 @@
                         </Popup>
                     </Grid>
                     <ControlTemplate.Triggers>
+                        <!-- 要居中就得跨过右边那 36px 的箭头列，否则内容只是在左半边居中，
+                             对整个框来说是偏左的。做成触发器而不是一律跨列：
+                             左对齐的下拉（服务商预设、模型名称）值可能很长，
+                             跨列会让长文字压到箭头下面。 -->
+                        <Trigger Property="HorizontalContentAlignment" Value="Center">
+                            <Setter TargetName="SelectionContent" Property="Grid.ColumnSpan" Value="2" />
+                        </Trigger>
                         <Trigger Property="IsEditable" Value="True">
                             <Setter TargetName="SelectionContent" Property="Visibility" Value="Hidden" />
                             <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible" />
@@ -532,12 +549,16 @@
         </Setter>
     </Style>
 
+    <!-- ViewportSize 必须显式 TemplateBinding。ScrollBar 只自动接 Minimum/Maximum/Value 到
+         PART_Track，ViewportSize 不接；拿不到就是 NaN，Track 会退化成"滑块给个最小值"，
+         于是不论内容多长，滑块都只有一小截，看着像列表边上浮了个灰点。 -->
     <ControlTemplate x:Key="ScrollBar.VerticalTemplate" TargetType="{x:Type ScrollBar}">
         <Grid Background="{DynamicResource Brush.Transparent}">
-            <Track x:Name="PART_Track" IsDirectionReversed="True">
+            <Track x:Name="PART_Track" IsDirectionReversed="True"
+                   ViewportSize="{TemplateBinding ViewportSize}">
                 <Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" /></Track.DecreaseRepeatButton>
                 <Track.Thumb>
-                    <Thumb x:Name="ScrollThumb" Margin="2,0">
+                    <Thumb x:Name="ScrollThumb" Margin="2,0" MinHeight="28">
                         <Thumb.Template><ControlTemplate TargetType="{x:Type Thumb}"><Border Background="{DynamicResource Brush.BorderStrong}" CornerRadius="{DynamicResource Radius.Small}" /></ControlTemplate></Thumb.Template>
                     </Thumb>
                 </Track.Thumb>
@@ -551,10 +572,10 @@
     </ControlTemplate>
     <ControlTemplate x:Key="ScrollBar.HorizontalTemplate" TargetType="{x:Type ScrollBar}">
         <Grid Background="{DynamicResource Brush.Transparent}">
-            <Track x:Name="PART_Track">
+            <Track x:Name="PART_Track" ViewportSize="{TemplateBinding ViewportSize}">
                 <Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageLeftCommand" Opacity="0" /></Track.DecreaseRepeatButton>
                 <Track.Thumb>
-                    <Thumb x:Name="ScrollThumb" Margin="0,2">
+                    <Thumb x:Name="ScrollThumb" Margin="0,2" MinWidth="28">
                         <Thumb.Template><ControlTemplate TargetType="{x:Type Thumb}"><Border Background="{DynamicResource Brush.BorderStrong}" CornerRadius="{DynamicResource Radius.Small}" /></ControlTemplate></Thumb.Template>
                     </Thumb>
                 </Track.Thumb>
@@ -566,13 +587,19 @@
             <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4" /></Trigger>
         </ControlTemplate.Triggers>
     </ControlTemplate>
+    <!-- 粗细只能约束「横切」那一边：垂直条约束宽、水平条约束高。
+         原来基础样式把 Width 和 Height 一起写死成 10，垂直滚动条连高度也被钉在 10px，
+         于是整条轨道缩成一颗悬在列表右边的小灰点 —— 看着像渲染坏了，其实是样式写反了。 -->
     <Style TargetType="{x:Type ScrollBar}">
         <Setter Property="Width" Value="10" />
-        <Setter Property="Height" Value="10" />
         <Setter Property="Opacity" Value="0.62" />
         <Setter Property="Template" Value="{StaticResource ScrollBar.VerticalTemplate}" />
         <Style.Triggers>
-            <Trigger Property="Orientation" Value="Horizontal"><Setter Property="Template" Value="{StaticResource ScrollBar.HorizontalTemplate}" /></Trigger>
+            <Trigger Property="Orientation" Value="Horizontal">
+                <Setter Property="Width" Value="Auto" />
+                <Setter Property="Height" Value="10" />
+                <Setter Property="Template" Value="{StaticResource ScrollBar.HorizontalTemplate}" />
+            </Trigger>
             <Trigger Property="IsMouseOver" Value="True"><Setter Property="Opacity" Value="1" /></Trigger>
         </Style.Triggers>
     </Style>

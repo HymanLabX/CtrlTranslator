@@ -48,14 +48,14 @@ public sealed class UpdateService : IDisposable
     /// 用户主动点「检查更新」。跟定时检查的区别：不看"是否已跳过这个版本"，
     /// 也会把"已经是最新版"这个结果如实返回给调用方去显示。
     /// </summary>
-    public async Task<ReleaseInfo?> CheckManuallyAsync(CancellationToken cancellationToken)
+    public async Task<UpdateCheckResult> CheckManuallyAsync(CancellationToken cancellationToken)
     {
         using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             _cancellation.Token);
-        ReleaseInfo? release = await UpdateChecker.CheckAsync(linked.Token);
-        PendingRelease = release;
-        return release;
+        UpdateCheckResult result = await UpdateChecker.CheckAsync(linked.Token);
+        PendingRelease = result.Release;
+        return result;
     }
 
     private void RunScheduledCheck()
@@ -79,7 +79,7 @@ public sealed class UpdateService : IDisposable
                 return;
             }
 
-            ReleaseInfo? release = await UpdateChecker.CheckAsync(_cancellation.Token);
+            ReleaseInfo? release = (await UpdateChecker.CheckAsync(_cancellation.Token)).Release;
             if (release is null)
             {
                 return;

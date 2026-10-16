@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Threading;
 using System.IO;
 using System.Windows;
@@ -22,6 +22,12 @@ public partial class App : System.Windows.Application
 {
     private const string MutexName = "Local\\CtrlTranslator.SingleInstance";
     private const string ActivationEventName = "Local\\CtrlTranslator.Activate";
+
+    /// <summary>
+    /// 用户点一下就该立刻见效的数据库操作（收藏等）的等待上限。
+    /// 超过这个时间说明库被别的进程锁住了，与其无限转下去，不如告诉用户稍后再试。
+    /// </summary>
+    private static readonly TimeSpan DatabaseInteractionTimeout = TimeSpan.FromSeconds(5);
     private const string UnexpectedErrorMessage =
         "程序遇到了意外错误，已记录到日志。如果反复出现，请把日志发给开发者。";
 
@@ -68,6 +74,9 @@ public partial class App : System.Windows.Application
 
             StartActivationListener();
 
+            // 剪贴板需要一个所有者窗口才能写入，必须在界面线程上建好。
+            ClipboardService.Initialize();
+
             SettingsStore settingsStore = new();
             _settingsStore = settingsStore;
             bool isFirstRun = !File.Exists(settingsStore.SettingsPath);
@@ -81,9 +90,6 @@ public partial class App : System.Windows.Application
             _trayIcon = new TrayIconController(settings, settingsStore);
             _trayIcon.SettingsRequested += TrayIcon_OnSettingsRequested;
             _trayIcon.MainWindowRequested += TrayIcon_OnMainWindowRequested;
-            _trayIcon.DiagnosticsRequested += TrayIcon_OnDiagnosticsRequested;
-            _trayIcon.UpdateCheckRequested += TrayIcon_OnUpdateCheckRequested;
-            _trayIcon.AboutRequested += TrayIcon_OnAboutRequested;
             if (!string.IsNullOrWhiteSpace(settingsStore.LastWarning))
             {
                 System.Windows.MessageBox.Show(
@@ -150,6 +156,10 @@ public partial class App : System.Windows.Application
             _updateService?.Dispose();
             _translationService?.Dispose();
             DisposeKeyboardHook();
+            if (HookThread.IsCreated)
+            {
+                HookThread.Instance.Dispose();
+            }
         }
         catch (Exception exception)
         {
@@ -172,9 +182,6 @@ public partial class App : System.Windows.Application
             {
                 _trayIcon.SettingsRequested -= TrayIcon_OnSettingsRequested;
                 _trayIcon.MainWindowRequested -= TrayIcon_OnMainWindowRequested;
-                _trayIcon.DiagnosticsRequested -= TrayIcon_OnDiagnosticsRequested;
-                _trayIcon.UpdateCheckRequested -= TrayIcon_OnUpdateCheckRequested;
-                _trayIcon.AboutRequested -= TrayIcon_OnAboutRequested;
             }
 
             _trayIcon?.Dispose();
@@ -192,6 +199,15 @@ public partial class App : System.Windows.Application
         catch (Exception exception)
         {
             Logger.Error("应用", "释放朗读服务失败。", exception);
+        }
+
+        try
+        {
+            ClipboardService.Shutdown();
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("应用", "释放剪贴板所有者窗口失败。", exception);
         }
 
         try
@@ -326,7 +342,6 @@ public partial class App : System.Windows.Application
     {
         try
         {
-            _settingsWindow?.RecordDoubleTap();
             AppState? appState = _appState;
             TextCapture? textCapture = _textCapture;
             if (appState is null || textCapture is null)
@@ -343,12 +358,6 @@ public partial class App : System.Windows.Application
             }
 
             ForegroundApp? foregroundApp = ForegroundApp.GetCurrent();
-            if (appState.IsBlacklisted(foregroundApp?.ProcessName))
-            {
-                Logger.Info("取词", $"用户触发划词，但前台程序 {foregroundApp?.ProcessName ?? "未知"} 在黑名单中，已忽略。");
-                return;
-            }
-
             if (!appState.TryEnterDebounce(Stopwatch.GetTimestamp()))
             {
                 Logger.Info("取词", "用户触发划词，但命中了防抖间隔，已忽略。");
@@ -381,11 +390,12 @@ public partial class App : System.Windows.Application
                     $"取词成功，共 {text.Length} 字，来源程序：{foregroundApp?.ProcessName ?? "未知"}。原文未记录。");
             }
 
-            if (text.Length > 20_000)
+            if (text.Length > AppSettings.MaxTranslatableChars)
             {
                 PopupWindow popup = CreatePopup(text, foregroundApp?.ProcessName);
                 popup.ShowTranslationError(new UserFacingError(
-                    $"选中内容过长（{text.Length} 字符），请分段翻译。单次上限 20000 字符。",
+                    $"选中内容过长（{text.Length} 字符），请分段翻译。"
+                    + $"单次上限 {AppSettings.MaxTranslatableChars} 字符。",
                     ErrorAction.None,
                     null));
                 return;
@@ -463,11 +473,12 @@ public partial class App : System.Windows.Application
                 popup.ShowResult(result);
             }
 
-            if (_mainWindow is not null)
+            // 命中缓存不产生新记录（历史按翻译发生的时间排，顺序不变），只有新译文才需要进列表。
+            if (_mainWindow is not null && !result.FromCache && result.RecordId is long recordId)
             {
                 try
                 {
-                    await _mainWindow.RefreshAsync();
+                    await _mainWindow.AddRecordAsync(recordId);
                 }
                 catch (Exception exception)
                 {
@@ -489,6 +500,27 @@ public partial class App : System.Windows.Application
                     _settings?.CurrentProfile.Model ?? string.Empty,
                     IsThinkingDisabled()));
             }
+        }
+    }
+
+    /// <summary>
+    /// 浮窗上「重试」按钮的入口。点击事件是同步的，这里必须自己兜住所有异常：
+    /// <see cref="StartTranslationAsync"/> 开头新建浮窗那几步不在它自己的 try 里，
+    /// 一旦在那儿出错，没人等这个 Task，异常就成了"未观察的任务异常"，只能等垃圾回收时才冒出来。
+    /// </summary>
+    private async Task RetryTranslationAsync(string text, string appName)
+    {
+        try
+        {
+            await StartTranslationAsync(text, appName);
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("翻译", "重试翻译失败。", exception);
+            ShowCaptureError(new UserFacingError(
+                "重试没有完成，详情已记录到日志。请重新选中文字再试一次。",
+                ErrorAction.None,
+                null));
         }
     }
 
@@ -559,7 +591,7 @@ public partial class App : System.Windows.Application
                     ShowSettingsWindow(focusExtraRequestBody: false);
                     break;
                 case ErrorAction.Retry when sender is PopupWindow retryPopup:
-                    _ = StartTranslationAsync(retryPopup.SourceText, retryPopup.AppName);
+                    _ = RetryTranslationAsync(retryPopup.SourceText, retryPopup.AppName);
                     break;
                 case ErrorAction.Diagnostics:
                     ShowProfileTest();
@@ -584,11 +616,14 @@ public partial class App : System.Windows.Application
         {
             if (_translationService is not null)
             {
-                await _translationService.SetStarredAsync(e.RecordId, e.Starred, CancellationToken.None);
+                // 库文件被同步盘/杀毒软件/DB 工具占住排他锁时，不给超时就是无限等待，
+                // 而这里没有任何进度反馈，用户只会觉得点了没反应。
+                using var timeout = new CancellationTokenSource(DatabaseInteractionTimeout);
+                await _translationService.SetStarredAsync(e.RecordId, e.Starred, timeout.Token);
                 Logger.Info("收藏", e.Starred ? "翻译已收藏。" : "翻译已取消收藏。");
                 if (_mainWindow is not null)
                 {
-                    await _mainWindow.RefreshAsync();
+                    await _mainWindow.UpdateStarredAsync(e.RecordId, e.Starred);
                 }
             }
             else
@@ -603,7 +638,12 @@ public partial class App : System.Windows.Application
         }
         catch (Exception exception)
         {
+            // 只写日志是不够的：图标已经点亮了，用户会以为收藏成功。必须把它改回去。
             Logger.Error("收藏", "收藏状态没有保存成功。", exception);
+            if (sender is PopupWindow popup)
+            {
+                popup.RevertStar(e.Starred);
+            }
         }
     }
 
@@ -661,11 +701,13 @@ public partial class App : System.Windows.Application
                 return;
             }
 
-            ApiProfile profile = _settings.CurrentProfile;
+            // 改的是这次真正出结果（或出错）的那个档案：自动降级之后它不一定是当前档案。
+            ApiProfile profile = _settings.FindProfile(popup.ProfileId) ?? _settings.CurrentProfile;
             string previousExtraRequestBody = profile.ExtraRequestBody;
             profile.ExtraRequestBody = ExtraRequestBodyHelper.SetThinkingDisabled(
                 previousExtraRequestBody,
-                disabled: true);
+                disabled: true,
+                profile.BaseUrl);
             if (!_settingsStore.TrySave(_settings, out string? errorMessage))
             {
                 profile.ExtraRequestBody = previousExtraRequestBody;
@@ -729,51 +771,6 @@ public partial class App : System.Windows.Application
     }
 
     private void TrayIcon_OnMainWindowRequested(object? sender, EventArgs e) => ShowMainWindow();
-
-    private void TrayIcon_OnDiagnosticsRequested(object? sender, EventArgs e) => ShowProfileTest();
-
-    private void TrayIcon_OnAboutRequested(object? sender, EventArgs e)
-    {
-        try
-        {
-            string version = System.Reflection.Assembly
-                .GetExecutingAssembly()
-                .GetName()
-                .Version?
-                .ToString(3) ?? "1.0.0";
-
-            System.Windows.MessageBox.Show(
-                $"CtrlTranslator v{version}\n"
-                + "\n"
-                + "在任意程序中选中文字，快速双击 Ctrl 即可翻译。\n"
-                + "API Key 用 Windows 账户加密保存在本机，翻译原文默认不写入日志。\n"
-                + "\n"
-                + "── 已知限制 ──\n"
-                + "\n"
-                + "1. 管理员权限的程序里划不了词\n"
-                + "   Windows 的 UIPI 机制不允许普通权限程序接收高权限程序的按键，\n"
-                + "   任务管理器、部分安装程序里双击 Ctrl 不会有反应。\n"
-                + "   需要的话可以用管理员身份运行本程序，但开机自启会失效。\n"
-                + "\n"
-                + "2. 杀毒软件可能误报\n"
-                + "   全局键盘钩子 + 模拟按键 + 读剪贴板是键盘记录器的典型特征。\n"
-                + "   被拦截时请到杀毒软件的信任区/排除项里添加本程序。\n"
-                + "\n"
-                + "3. 剪贴板里的图片会丢\n"
-                + "   取词后会还原你原来的剪贴板，但 v1.0 只能还原文字。\n"
-                + "   刚截图还没粘贴时，请先粘贴完再划词。\n"
-                + "\n"
-                + "更多说明见程序目录下的 README.md。\n"
-                + "遇到问题请先用「设置 → 服务商档案 → 测试」自查。",
-                "关于 CtrlTranslator",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-        }
-        catch (Exception exception)
-        {
-            Logger.Error("关于", "显示关于信息失败。", exception);
-        }
-    }
 
     private void ShowMainWindow()
     {
@@ -907,34 +904,6 @@ public partial class App : System.Windows.Application
         ShowSettingsWindow(focusExtraRequestBody: false);
     }
 
-    private async void TrayIcon_OnUpdateCheckRequested(object? sender, EventArgs e)
-    {
-        if (_updateService is null)
-        {
-            return;
-        }
-
-        try
-        {
-            _trayIcon?.ShowInformation("CtrlTranslator", "正在检查更新…");
-            ReleaseInfo? release = await _updateService.CheckManuallyAsync(CancellationToken.None);
-            if (release is null)
-            {
-                _trayIcon?.ShowInformation(
-                    "CtrlTranslator",
-                    $"已经是最新版本 {UpdateChecker.CurrentVersion.ToString(3)}。");
-                return;
-            }
-
-            ShowUpdateWindow(release);
-        }
-        catch (Exception exception)
-        {
-            Logger.Error("自动更新", "手动检查更新失败。", exception);
-            _trayIcon?.ShowError("检查更新没有完成，可能是连不上 GitHub。详情见日志。");
-        }
-    }
-
     /// <summary>
     /// 弹出更新窗口。同一时刻只允许存在一个，重复触发时把已有的那个激活到前面。
     /// </summary>
@@ -1046,9 +1015,12 @@ public partial class App : System.Windows.Application
             return _mainWindow;
         }
 
-        if (_settings is null || _settingsStore is null || _historyRepository is null)
+        if (_settings is null
+            || _settingsStore is null
+            || _historyRepository is null
+            || _translationService is null)
         {
-            throw new InvalidOperationException("设置或历史服务尚未初始化。");
+            throw new InvalidOperationException("设置、历史或翻译服务尚未初始化。");
         }
 
         _settingsWindow = new SettingsWindow(
@@ -1059,7 +1031,9 @@ public partial class App : System.Windows.Application
             CreateDiagnosticRunner,
             _updateService,
             ShowUpdateWindow);
-        _mainWindow = new MainWindow(_historyRepository, _settingsWindow);
+        var deepTranslationView = new DeepTranslationView(_settings, _translationService);
+        _mainWindow = new MainWindow(
+            _settings, _historyRepository, _settingsWindow, deepTranslationView);
         _mainWindow.Closed += MainWindow_OnClosed;
         return _mainWindow;
     }
@@ -1077,7 +1051,6 @@ public partial class App : System.Windows.Application
 
     private void OnSettingsChanged(SettingsChangeKind changeKind)
     {
-        _appState?.RefreshBlacklist();
         _trayIcon?.RefreshFromSettings();
         if (changeKind == SettingsChangeKind.KeyboardHook)
         {
@@ -1092,7 +1065,6 @@ public partial class App : System.Windows.Application
             settings.DoubleTapIntervalMs,
             settings.MaxKeyHoldMs);
         var keyboardHook = new LowLevelKeyboardHook(Dispatcher, detector);
-        keyboardHook.ValidTapped += OnValidTapped;
         keyboardHook.DoubleTapped += OnDoubleTapped;
         keyboardHook.EscapePressed += OnEscapePressed;
         try
@@ -1102,7 +1074,6 @@ public partial class App : System.Windows.Application
         }
         catch
         {
-            keyboardHook.ValidTapped -= OnValidTapped;
             keyboardHook.DoubleTapped -= OnDoubleTapped;
             keyboardHook.EscapePressed -= OnEscapePressed;
             keyboardHook.Dispose();
@@ -1119,7 +1090,6 @@ public partial class App : System.Windows.Application
 
         LowLevelKeyboardHook keyboardHook = _keyboardHook;
         _keyboardHook = null;
-        keyboardHook.ValidTapped -= OnValidTapped;
         keyboardHook.DoubleTapped -= OnDoubleTapped;
         keyboardHook.EscapePressed -= OnEscapePressed;
         keyboardHook.Dispose();
@@ -1146,11 +1116,6 @@ public partial class App : System.Windows.Application
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
-    }
-
-    private void OnValidTapped(object? sender, EventArgs e)
-    {
-        _settingsWindow?.RecordValidTap();
     }
 
     private bool IsThinkingDisabled()

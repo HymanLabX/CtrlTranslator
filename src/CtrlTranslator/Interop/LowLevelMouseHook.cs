@@ -15,6 +15,11 @@ internal sealed class OutsideClickEventArgs(int x, int y) : EventArgs
 /// <summary>
 /// 浮窗显示期间监听全局鼠标按下；回调只比较数字并异步投递关闭事件。
 /// </summary>
+/// <remarks>
+/// 和键盘钩子一样装在专用的钩子线程（<see cref="HookThread"/>）上：界面线程一卡，
+/// 装在界面线程上的鼠标钩子会被系统悄悄撤掉，表现是"点浮窗外面不关了"。
+/// 回调里读写的几个数字都走 <see cref="Volatile"/> / <see cref="Interlocked"/>，跨线程是安全的。
+/// </remarks>
 internal sealed class LowLevelMouseHook : IDisposable
 {
     private readonly Dispatcher _dispatcher;
@@ -46,16 +51,19 @@ internal sealed class LowLevelMouseHook : IDisposable
             return;
         }
 
-        nint moduleHandle = NativeMethods.GetModuleHandle(null);
-        _hookHandle = NativeMethods.SetWindowsHookEx(
-            NativeMethods.WhMouseLl,
-            _procedure,
-            moduleHandle,
-            0);
-        if (_hookHandle == nint.Zero)
+        HookThread.Instance.Invoke(() =>
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法安装浮窗鼠标监听。");
-        }
+            nint moduleHandle = NativeMethods.GetModuleHandle(null);
+            _hookHandle = NativeMethods.SetWindowsHookEx(
+                NativeMethods.WhMouseLl,
+                _procedure,
+                moduleHandle,
+                0);
+            if (_hookHandle == nint.Zero)
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "无法安装浮窗鼠标监听。");
+            }
+        });
     }
 
     public void UpdateBounds(int left, int top, int right, int bottom)
@@ -85,7 +93,12 @@ internal sealed class LowLevelMouseHook : IDisposable
         }
 
         _disposed = true;
-        if (_hookHandle != nint.Zero)
+        if (_hookHandle == nint.Zero)
+        {
+            return;
+        }
+
+        HookThread.Instance.Invoke(() =>
         {
             if (!NativeMethods.UnhookWindowsHookEx(_hookHandle))
             {
@@ -93,7 +106,7 @@ internal sealed class LowLevelMouseHook : IDisposable
             }
 
             _hookHandle = nint.Zero;
-        }
+        });
     }
 
     private nint HookCallback(int code, nint message, nint dataPointer)

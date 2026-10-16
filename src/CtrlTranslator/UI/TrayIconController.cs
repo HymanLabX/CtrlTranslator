@@ -24,13 +24,18 @@ public sealed class TrayIconController : IDisposable
     private readonly Icon _warningIcon;
     private readonly nint _warningIconHandle;
     private readonly Forms.ToolStripMenuItem _enabledItem;
-    private readonly Forms.ToolStripMenuItem _thinkingDisabledItem;
     private readonly Forms.ToolStripMenuItem _privacyItem;
     private readonly Forms.ToolStripMenuItem _modesItem;
     private readonly Forms.ToolStripMenuItem _profilesItem;
     private readonly List<Forms.ToolStripMenuItem> _modeItems = [];
     private readonly List<Forms.ToolStripMenuItem> _profileItems = [];
     private bool _disposed;
+
+    /// <summary>
+    /// 本次运行出现过未处理异常（SPEC §9.3 第 3 条）。以前只改一次悬停文字，
+    /// 下次右键打开菜单时 <see cref="RefreshVisualState"/> 一刷新就冲掉了 —— 警告态只活了几秒。
+    /// </summary>
+    private bool _hasUnhandledError;
 
     public TrayIconController(AppSettings settings, SettingsStore settingsStore)
     {
@@ -45,7 +50,9 @@ public sealed class TrayIconController : IDisposable
         _menu.Items.Add(CreateActionItem("设置…", RaiseSettingsRequested));
         _menu.Items.Add(new Forms.ToolStripSeparator());
 
-        _profilesItem = new Forms.ToolStripMenuItem("翻译服务");
+        // 右键菜单只留最常用的几项：切模型、切模式、开关划词和隐私模式。
+        // 测试服务、日志文件夹、检查更新、关于这些都在设置窗口里，不必在这里再摆一遍。
+        _profilesItem = new Forms.ToolStripMenuItem("翻译模型");
         RebuildProfileItems();
         _menu.Items.Add(_profilesItem);
 
@@ -62,16 +69,6 @@ public sealed class TrayIconController : IDisposable
         _enabledItem.Click += (_, _) => ExecuteSafely("切换启用状态", ToggleEnabled);
         _menu.Items.Add(_enabledItem);
 
-        _thinkingDisabledItem = new Forms.ToolStripMenuItem("关闭模型思考模式")
-        {
-            CheckOnClick = true,
-            Checked = ExtraRequestBodyHelper.IsThinkingDisabled(_settings.CurrentProfile.ExtraRequestBody),
-            ToolTipText = "只作用于当前服务商档案。关闭后翻译更快更省钱；遇到特别难的长句可临时取消勾选让模型思考"
-        };
-        _thinkingDisabledItem.Click += (_, _) =>
-            ExecuteSafely("切换模型思考模式", ToggleThinkingDisabled);
-        _menu.Items.Add(_thinkingDisabledItem);
-
         _privacyItem = new Forms.ToolStripMenuItem("隐私模式（不记录历史）")
         {
             CheckOnClick = true,
@@ -81,11 +78,6 @@ public sealed class TrayIconController : IDisposable
         _menu.Items.Add(_privacyItem);
         _menu.Items.Add(new Forms.ToolStripSeparator());
 
-        _menu.Items.Add(CreateActionItem("测试当前服务…", () => RaiseRequested(DiagnosticsRequested, "服务商测试")));
-        _menu.Items.Add(CreateActionItem("打开日志文件夹", OpenLogDirectory));
-        _menu.Items.Add(new Forms.ToolStripSeparator());
-        _menu.Items.Add(CreateActionItem("检查更新…", () => RaiseRequested(UpdateCheckRequested, "检查更新")));
-        _menu.Items.Add(CreateActionItem("关于", () => RaiseRequested(AboutRequested, "关于窗口")));
         _menu.Items.Add(CreateActionItem("退出", () => System.Windows.Application.Current.Shutdown()));
 
         _notifyIcon = new Forms.NotifyIcon
@@ -101,12 +93,6 @@ public sealed class TrayIconController : IDisposable
     public event EventHandler? SettingsRequested;
 
     public event EventHandler? MainWindowRequested;
-
-    public event EventHandler? DiagnosticsRequested;
-
-    public event EventHandler? UpdateCheckRequested;
-
-    public event EventHandler? AboutRequested;
 
     public void ShowInformation(string title, string message)
     {
@@ -128,7 +114,6 @@ public sealed class TrayIconController : IDisposable
     {
         _enabledItem.Checked = _settings.Enabled;
         _privacyItem.Checked = _settings.PrivacyMode;
-        RefreshThinkingDisabledState();
         RebuildProfileItems();
         RebuildModeItems();
         RefreshVisualState();
@@ -144,9 +129,14 @@ public sealed class TrayIconController : IDisposable
         });
     }
 
+    /// <summary>
+    /// 切到"出现过错误"状态：图标带红点、悬停文字提示查看日志、左键单击打开日志文件夹（SPEC §9.3）。
+    /// 用户点开过一次日志就算看到了，状态随之解除，左键恢复成打开主窗口。
+    /// </summary>
     public void SetWarningState()
     {
-        _notifyIcon.Text = "CtrlTranslator — 出现过错误，请查看日志";
+        _hasUnhandledError = true;
+        RefreshVisualState();
     }
 
     public void Dispose()
@@ -162,6 +152,22 @@ public sealed class TrayIconController : IDisposable
         _menu.Opening -= Menu_OnOpening;
         _notifyIcon.Dispose();
         _menu.Dispose();
+
+        // 这四项和动态生成的模式/档案菜单项都是 IDisposable，
+        // ContextMenuStrip.Dispose 只释放它当前挂着的项，重建过的旧项不在其中。
+        _enabledItem.Dispose();
+        _privacyItem.Dispose();
+        _modesItem.Dispose();
+        _profilesItem.Dispose();
+        foreach (Forms.ToolStripMenuItem item in _modeItems)
+        {
+            item.Dispose();
+        }
+
+        foreach (Forms.ToolStripMenuItem item in _profileItems)
+        {
+            item.Dispose();
+        }
         _enabledIcon.Dispose();
         _pausedIcon.Dispose();
         _warningIcon.Dispose();
@@ -233,10 +239,20 @@ public sealed class TrayIconController : IDisposable
     {
         ExecuteSafely("托盘图标单击", () =>
         {
-            if (eventArgs.Button == Forms.MouseButtons.Left)
+            if (eventArgs.Button != Forms.MouseButtons.Left)
             {
-                RaiseRequested(MainWindowRequested, "主窗口");
+                return;
             }
+
+            if (_hasUnhandledError)
+            {
+                _hasUnhandledError = false;
+                RefreshVisualState();
+                OpenLogDirectory();
+                return;
+            }
+
+            RaiseRequested(MainWindowRequested, "主窗口");
         });
     }
 
@@ -255,34 +271,6 @@ public sealed class TrayIconController : IDisposable
         Logger.Info("托盘", _settings.PrivacyMode ? "隐私模式已启用。" : "隐私模式已关闭。");
     }
 
-    private void ToggleThinkingDisabled()
-    {
-        bool disabled = _thinkingDisabledItem.Checked;
-        ApiProfile profile = _settings.CurrentProfile;
-        string previousValue = profile.ExtraRequestBody;
-        profile.ExtraRequestBody = ExtraRequestBodyHelper.SetThinkingDisabled(
-            previousValue,
-            disabled);
-
-        if (!_settingsStore.TrySave(_settings, out string? errorMessage))
-        {
-            profile.ExtraRequestBody = previousValue;
-            _thinkingDisabledItem.Checked = !disabled;
-            System.Windows.MessageBox.Show(
-                errorMessage ?? "思考模式设置保存失败，请稍后重试。",
-                "CtrlTranslator",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-            return;
-        }
-
-        Logger.Info(
-            "托盘",
-            disabled
-                ? $"档案「{profile.Name}」的模型思考模式已关闭。"
-                : $"档案「{profile.Name}」的模型思考模式已恢复为服务商默认状态。");
-    }
-
     private void SelectProfile(string profileId)
     {
         ApiProfile? profile = _settings.FindProfile(profileId);
@@ -293,9 +281,8 @@ public sealed class TrayIconController : IDisposable
 
         _settings.CurrentProfileId = profileId;
         RebuildProfileItems();
-        RefreshThinkingDisabledState();
         SaveSettings();
-        Logger.Info("托盘", $"当前翻译服务已切换为「{profile.Name}」。");
+        Logger.Info("托盘", $"当前翻译模型已切换为「{profile.Name}」。");
     }
 
     private void RebuildProfileItems()
@@ -313,13 +300,13 @@ public sealed class TrayIconController : IDisposable
                     ? $"已标记失效：{profile.FailureReason}。到设置里改一下就会自动解除。"
                     : profile.Model
             };
-            item.Click += (_, _) => ExecuteSafely("切换翻译服务", () => SelectProfile(profileId));
+            item.Click += (_, _) => ExecuteSafely("切换翻译模型", () => SelectProfile(profileId));
             _profileItems.Add(item);
             _profilesItem.DropDownItems.Add(item);
         }
 
         _profilesItem.DropDownItems.Add(new Forms.ToolStripSeparator());
-        _profilesItem.DropDownItems.Add(CreateActionItem("管理服务商档案…", RaiseSettingsRequested));
+        _profilesItem.DropDownItems.Add(CreateActionItem("管理翻译模型…", RaiseSettingsRequested));
     }
 
     private void SelectMode(string modeId)
@@ -354,6 +341,13 @@ public sealed class TrayIconController : IDisposable
 
     private void RefreshVisualState()
     {
+        if (_hasUnhandledError)
+        {
+            _notifyIcon.Icon = _warningIcon;
+            _notifyIcon.Text = "CtrlTranslator — 出现过错误，请查看日志（单击打开）";
+            return;
+        }
+
         int failedCount = _settings.Profiles.Count(profile => profile.IsFailed);
         if (!_settings.Enabled)
         {
@@ -365,19 +359,13 @@ public sealed class TrayIconController : IDisposable
         // 托盘提示文字有 63 字符上限，超出会被 Windows 直接截断，所以这里只报数不报名字。
         _notifyIcon.Icon = failedCount > 0 ? _warningIcon : _enabledIcon;
         _notifyIcon.Text = failedCount > 0
-            ? $"CtrlTranslator — {failedCount} 个服务商已失效，点开设置修一下"
+            ? $"CtrlTranslator — {failedCount} 个翻译模型已失效，点开设置修一下"
             : "CtrlTranslator — 划词已启用";
     }
 
     private void Menu_OnOpening(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         RefreshFromSettings();
-    }
-
-    private void RefreshThinkingDisabledState()
-    {
-        _thinkingDisabledItem.Checked = ExtraRequestBodyHelper.IsThinkingDisabled(
-            _settings.CurrentProfile.ExtraRequestBody);
     }
 
     private void SaveSettings()

@@ -6,7 +6,12 @@
     <Color x:Key="Color.Surface">#FFFFFF</Color>
     <Color x:Key="Color.SurfaceRaised">#FFFFFF</Color>
     <Color x:Key="Color.SurfaceSubtle">#F7F7F8</Color>
+    <!-- 导航底色分两级：一级导航最深、二级目录次之、内容区纯白。
+         旧版侧栏 #F3F3F3 和工作区 #F7F7F8 只差一档，实机上肉眼分不出是两块区域。 -->
+    <Color x:Key="Color.NavPrimary">#F2F2F3</Color>
+    <Color x:Key="Color.NavSecondary">#F9F9FA</Color>
     <Color x:Key="Color.Border">#E5E5E5</Color>
+    <Color x:Key="Color.BorderSoft">#EDEDEE</Color>
     <Color x:Key="Color.BorderStrong">#D1D1D1</Color>
     <Color x:Key="Color.Text">#171717</Color>
     <Color x:Key="Color.TextSecondary">#5D5D5D</Color>
@@ -31,7 +36,10 @@
     <SolidColorBrush x:Key="Brush.Surface" Color="{StaticResource Color.Surface}" />
     <SolidColorBrush x:Key="Brush.SurfaceRaised" Color="{StaticResource Color.SurfaceRaised}" />
     <SolidColorBrush x:Key="Brush.SurfaceSubtle" Color="{StaticResource Color.SurfaceSubtle}" />
+    <SolidColorBrush x:Key="Brush.NavPrimary" Color="{StaticResource Color.NavPrimary}" />
+    <SolidColorBrush x:Key="Brush.NavSecondary" Color="{StaticResource Color.NavSecondary}" />
     <SolidColorBrush x:Key="Brush.Border" Color="{StaticResource Color.Border}" />
+    <SolidColorBrush x:Key="Brush.BorderSoft" Color="{StaticResource Color.BorderSoft}" />
     <SolidColorBrush x:Key="Brush.BorderStrong" Color="{StaticResource Color.BorderStrong}" />
     <SolidColorBrush x:Key="Brush.Text" Color="{StaticResource Color.Text}" />
     <SolidColorBrush x:Key="Brush.TextSecondary" Color="{StaticResource Color.TextSecondary}" />
@@ -62,6 +70,9 @@
     <sys:Double x:Key="Size.BodySmall">12</sys:Double>
     <sys:Double x:Key="Size.Body">14</sys:Double>
     <sys:Double x:Key="Size.BodyLarge">15</sys:Double>
+    <!-- 分组标题。必须大于正文 14 —— 一个比它统领的内容还小还浅的标题，层级是反的。
+         西文那套「小写灰色眉标」靠大写 + 字距立住，中文没有大小写，学不来。 -->
+    <sys:Double x:Key="Size.Subheading">16</sys:Double>
     <sys:Double x:Key="Size.Title">17</sys:Double>
     <sys:Double x:Key="Size.Heading">22</sys:Double>
     <sys:Double x:Key="Size.Display">30</sys:Double>
@@ -81,12 +92,14 @@
     <CornerRadius x:Key="Radius.Small">8</CornerRadius>
     <CornerRadius x:Key="Radius.Medium">10</CornerRadius>
     <CornerRadius x:Key="Radius.Large">14</CornerRadius>
-    <CornerRadius x:Key="Radius.Popup">16</CornerRadius>
+    <CornerRadius x:Key="Radius.Popup">14</CornerRadius>
     <CornerRadius x:Key="Radius.Pill">999</CornerRadius>
 
+    <!-- 收一点：blur 28 / depth 6 在 480px 的小窗上糊得偏散，边缘反而不清楚。
+         WPF 一个元素只能挂一个 Effect，做不了「远近两层阴影」，那就把这一层调实。 -->
     <DropShadowEffect x:Key="Effect.PopupShadow"
-                      BlurRadius="28" ShadowDepth="6" Direction="270"
-                      Opacity="0.2" Color="#000000" />
+                      BlurRadius="22" ShadowDepth="4" Direction="270"
+                      Opacity="0.22" Color="#000000" />
     <DropShadowEffect x:Key="Effect.CardGlow"
                       BlurRadius="14" ShadowDepth="2" Opacity="0.12"
                       Color="#000000" />

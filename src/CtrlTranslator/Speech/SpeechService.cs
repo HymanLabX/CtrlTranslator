@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Speech.Synthesis;
 using CtrlTranslator.Diagnostics;
+using CtrlTranslator.Translation;
 
 namespace CtrlTranslator.Speech;
 
@@ -15,6 +16,12 @@ public sealed class SpeechService : IDisposable
 
     private readonly SpeechSynthesizer? _synthesizer;
     private readonly List<InstalledVoice> _voices = [];
+
+    /// <summary>
+    /// 系统默认语音。原文语言找不到对应语音时退回它 —— 以前是什么都不做，
+    /// 结果沿用上一次选中的语音，拿英文语音去念中文。
+    /// </summary>
+    private readonly string? _defaultVoiceName;
     private bool _disposed;
 
     public SpeechService()
@@ -38,6 +45,7 @@ public sealed class SpeechService : IDisposable
 
             synthesizer.SpeakCompleted += OnSpeakCompleted;
             _synthesizer = synthesizer;
+            _defaultVoiceName = synthesizer.Voice?.Name;
             Logger.Info(
                 "朗读",
                 $"朗读服务就绪，可用语音 {_voices.Count} 个："
@@ -154,6 +162,7 @@ public sealed class SpeechService : IDisposable
 
         if (candidates.Count == 0)
         {
+            RestoreDefaultVoice();
             return;
         }
 
@@ -179,34 +188,41 @@ public sealed class SpeechService : IDisposable
         }
     }
 
+    private void RestoreDefaultVoice()
+    {
+        if (_synthesizer is null || string.IsNullOrEmpty(_defaultVoiceName))
+        {
+            return;
+        }
+
+        try
+        {
+            _synthesizer.SelectVoice(_defaultVoiceName);
+        }
+        catch (Exception exception)
+        {
+            Logger.Warning("朗读", $"恢复默认语音「{_defaultVoiceName}」失败：{exception.Message}");
+        }
+    }
+
     /// <summary>
-    /// 极简语言判定：CJK 字符占比超过 20% 视为中文，否则按英文处理。
-    /// 与 §5.4 的翻译方向判定采用同一口径。
+    /// 原文的语言。与 §5.4 的翻译方向判定用同一份判断（<see cref="TextLanguage"/>），
+    /// 日文、韩文能挑到对应语音；其余文字按英文处理。
     /// </summary>
     private static string DetectLanguage(string text)
     {
-        int cjk = 0;
-        int letters = 0;
-        foreach (char character in text)
-        {
-            if (char.IsWhiteSpace(character) || char.IsPunctuation(character) || char.IsSymbol(character))
-            {
-                continue;
-            }
-
-            letters++;
-            if (character is >= '一' and <= '鿿')
-            {
-                cjk++;
-            }
-        }
-
-        if (letters == 0)
+        if (string.IsNullOrWhiteSpace(text))
         {
             return CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
         }
 
-        return cjk * 100 / letters > 20 ? "zh" : "en";
+        return TextLanguage.Detect(text) switch
+        {
+            TextScript.Chinese => "zh",
+            TextScript.Japanese => "ja",
+            TextScript.Korean => "ko",
+            _ => "en"
+        };
     }
 
     private void OnSpeakCompleted(object? sender, SpeakCompletedEventArgs e)

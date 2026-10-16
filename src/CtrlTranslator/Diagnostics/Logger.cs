@@ -19,6 +19,13 @@ public static partial class Logger
     private static System.Threading.Timer? _queueTimer;
     private static int _isDrainingQueue;
 
+    /// <summary>
+    /// 上一次清理过期日志是哪一天。托盘程序一开就是几个星期，只在启动时清理的话，
+    /// 「自动删除 14 天前的日志」这条规矩实际上永远等不到执行（实测 17 天的日志都还在）。
+    /// 所以改成：每跨过一天，写下一行日志之前顺手清一次。
+    /// </summary>
+    private static DateTime _lastCleanupDate = DateTime.MinValue;
+
     public static string DataDirectory { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "CtrlTranslator");
@@ -33,6 +40,7 @@ public static partial class Logger
             _logDirectory = Path.Combine(DataDirectory, "logs");
             Directory.CreateDirectory(_logDirectory);
             _initialized = true;
+            _lastCleanupDate = DateTime.Now.Date;
             DeleteExpiredLogs();
             _queueTimer ??= new System.Threading.Timer(
                 static _ => DrainQueuedLogs(),
@@ -68,8 +76,55 @@ public static partial class Logger
     {
         string fullMessage = exception is null
             ? message
-            : $"{message} | {exception.GetType().Name}: {exception.Message}{Environment.NewLine}{exception.StackTrace}";
+            : $"{message} | {Describe(exception)}{Environment.NewLine}{exception.StackTrace}";
         Write("错误", module, fullMessage);
+    }
+
+    /// <summary>
+    /// 把异常连同它的内层原因写成一行：<c>外层类型: 消息 ← 内层类型: 消息 ← …</c>。
+    /// </summary>
+    /// <remarks>
+    /// 只写外层那一句是不够的。实际日志里反复出现
+    /// 「The SSL connection could not be established, see inner exception.」——
+    /// 真正的原因（证书、协议、代理）全在内层，以前一个字都没记下来，
+    /// 「详情见日志」打开一看什么也没有。调用栈仍然只记外层的，内层只要类型和消息就够定位。
+    /// </remarks>
+    public static string Describe(Exception exception)
+    {
+        StringBuilder builder = new();
+        AppendException(builder, exception, depth: 0);
+        return builder.ToString();
+    }
+
+    private static void AppendException(StringBuilder builder, Exception exception, int depth)
+    {
+        if (depth > 0)
+        {
+            builder.Append(" ← ");
+        }
+
+        builder.Append(exception.GetType().Name).Append(": ").Append(exception.Message);
+
+        // 层数设个上限：异常链理论上可以无限长，日志一行没必要写成一本书。
+        if (depth >= 5)
+        {
+            return;
+        }
+
+        if (exception is AggregateException aggregate)
+        {
+            foreach (Exception inner in aggregate.InnerExceptions.Take(3))
+            {
+                AppendException(builder, inner, depth + 1);
+            }
+
+            return;
+        }
+
+        if (exception.InnerException is { } innerException)
+        {
+            AppendException(builder, innerException, depth + 1);
+        }
     }
 
     /// <summary>
@@ -118,10 +173,19 @@ public static partial class Logger
                 throw new InvalidOperationException("日志系统尚未初始化。");
             }
 
+            DateTime now = DateTime.Now;
+            if (now.Date != _lastCleanupDate)
+            {
+                // 先改日期再清理：清理失败时会回头调 Error() 写日志，
+                // 日期不先落位的话就会在这里无限递归。
+                _lastCleanupDate = now.Date;
+                DeleteExpiredLogs();
+            }
+
             string safeModule = Redact(module).ReplaceLineEndings(" ");
             string safeMessage = Redact(message).ReplaceLineEndings(" ⏎ ");
-            string line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [{level}] [{safeModule}] {safeMessage}{Environment.NewLine}";
-            string path = Path.Combine(_logDirectory, $"ctrltranslator-{DateTime.Now:yyyyMMdd}.log");
+            string line = $"[{now:yyyy-MM-dd HH:mm:ss.fff}] [{level}] [{safeModule}] {safeMessage}{Environment.NewLine}";
+            string path = Path.Combine(_logDirectory, $"ctrltranslator-{now:yyyyMMdd}.log");
             File.AppendAllText(path, line, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         }
     }
@@ -158,7 +222,7 @@ public static partial class Logger
             {
                 string fullMessage = pending.Exception is null
                     ? pending.Message
-                    : $"{pending.Message} | {pending.Exception.GetType().Name}: {pending.Exception.Message}"
+                    : $"{pending.Message} | {Describe(pending.Exception)}"
                         + $"{Environment.NewLine}{pending.Exception.StackTrace}";
                 Write(pending.Level, pending.Module, fullMessage);
             }

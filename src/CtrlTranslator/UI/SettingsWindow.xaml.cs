@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
+using CtrlTranslator.Core;
 using CtrlTranslator.Data;
 using CtrlTranslator.Diagnostics;
 using CtrlTranslator.Settings;
@@ -51,9 +52,40 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
     private CancellationTokenSource? _testCancellation;
     private DiagnosticRunner? _lastTestRunner;
     private bool _loading = true;
+    // 浮窗尺寸 / 字号不再有输入框，预设按钮直接改这三个字段，再由 SaveAll 统一落盘 ——
+    // 和「浮窗配色」走的是同一条路。
+    private double _popupMaxWidth = 480;
+    private double _popupMaxHeight = 400;
+    private double _popupFontSize = 14;
+    private string _popupThemeName = PopupThemes.DefaultName;
+    private string _popupCustomSurface = "#FFFFFF";
+    private string _popupCustomText = "#171717";
+    private bool _startWithWindows;
     private bool _apiKeyVisible;
     private bool _feedbackReady;
-    private int _testTapCount;
+
+    /// <summary>
+    /// 「新建模型」正在填、但还没成型的那一个。<b>刻意不放进 <c>_settings.Profiles</c></b>：
+    /// 一旦放进去，它立刻就是一张卡片、会被写盘、还会参与划词失败时的回退，
+    /// 而此时它连接口地址都没有。填齐三项（接口地址 / API Key / 模型名称）才真正加入。
+    /// </summary>
+    private ApiProfile? _draftProfile;
+
+    /// <summary>
+    /// 草稿是否已经通过一次连接检测。<b>这是"能不能添加"的唯一判据</b> ——
+    /// 光看三个字段非空只能证明"填了东西"，证明不了这个模型真能翻译；
+    /// 地址打错一个字母、Key 过期、模型名不存在，全都要等到真正划词时才暴露。
+    /// 任何一处连接信息被改动都会把它重置回 false（见 SaveAll）。
+    /// </summary>
+    private bool _draftTestPassed;
+
+    /// <summary>拖动排序用：按下时的坐标和被按住的那张卡片。</summary>
+    private System.Windows.Point _cardDragStart;
+    private ProfileListItem? _cardDragCandidate;
+    private bool _cardDragStarted;
+
+    /// <summary>模式卡片：这次按下是不是落在某张卡片上（抬起时才决定跳不跳详情）。</summary>
+    private bool _modeCardPressed;
 
     public SettingsWindow(
         AppSettings settings,
@@ -88,7 +120,6 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             GeneralSection,
             ProfilesSection,
             BehaviorSection,
-            PrivacySection,
             AboutSection
         ];
         _sectionTabs =
@@ -96,13 +127,11 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             GeneralTabButton,
             ServiceTabButton,
             PreferenceTabButton,
-            PrivacyTabButton,
             AboutTabButton
         ];
         TestResultsList.ItemsSource = _testResults;
 
         LoadControlsFromSettings();
-        RefreshProcessList();
         SelectSection(GeneralSectionIndex);
         _loading = false;
         UpdateExtraRequestBodyValidation();
@@ -112,57 +141,45 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
     /// <summary>打开「服务商档案」页；需要时把焦点直接落到额外请求参数上。</summary>
     internal void ShowTranslationService(bool focusExtraRequestBody)
     {
+        // 这条路是浮窗上"打开设置"点进来的，用户要改的是当前那个模型的参数，
+        // 所以直接落到详情页，不要停在卡片网格上让人再点一次。
+        SelectSection(ProfilesSectionIndex);
+        ShowProfileDetail();
+
         if (focusExtraRequestBody)
         {
-            SelectSection(ProfilesSectionIndex);
             AdvancedModelSettingsExpander.IsExpanded = true;
             Dispatcher.BeginInvoke(() =>
             {
                 ExtraRequestBodyBox.Focus();
                 ExtraRequestBodyBox.SelectAll();
             }, DispatcherPriority.Input);
-            return;
         }
-
-        SelectSection(ProfilesSectionIndex);
     }
 
-    /// <summary>打开「服务商档案」页并立刻跑一遍测试。浮窗上那些"查不出原因"的错误走这条路。</summary>
+    /// <summary>打开当前模型的详情并立刻跑一遍检测。浮窗上那些"查不出原因"的错误走这条路。</summary>
     internal void ShowProfileTest()
     {
         SelectSection(ProfilesSectionIndex);
+        ShowProfileDetail();
         _ = RunProfileTestAsync();
     }
 
-    internal void RecordValidTap()
-    {
-        if (!IsVisible)
-        {
-            return;
-        }
+    /// <summary>
+    /// 草稿优先。这样所有既有的字段处理器（改名、改地址、改 Key、SaveAll…）
+    /// 不用知道草稿的存在，照常读写"当前这个档案"即可；
+    /// 草稿不在 <c>_settings.Profiles</c> 里，SaveAll 自然也就落不了盘。
+    /// </summary>
+    private ApiProfile? SelectedProfile =>
+        _draftProfile ?? (ProfilesList.SelectedItem as ProfileListItem)?.Profile;
 
-        _testTapCount = Math.Min(2, _testTapCount + 1);
-        DoubleTapTestText.Text = string.Join(' ', Enumerable.Repeat("●", _testTapCount));
-        DoubleTapTestText.SetResourceReference(
-            System.Windows.Controls.TextBlock.ForegroundProperty,
-            "Brush.TextSecondary");
-    }
+    /// <summary>模式列表现在装的是卡片包装项，取值统一走这里。</summary>
+    private TranslationMode? SelectedMode => (ModesList.SelectedItem as ModeListItem)?.Mode;
 
-    internal void RecordDoubleTap()
-    {
-        if (!IsVisible)
-        {
-            return;
-        }
-
-        _testTapCount = 0;
-        DoubleTapTestText.Text = "✓ 双击已识别";
-        DoubleTapTestText.SetResourceReference(
-            System.Windows.Controls.TextBlock.ForegroundProperty,
-            "Brush.Success");
-    }
-
-    private ApiProfile? SelectedProfile => (ProfilesList.SelectedItem as ProfileListItem)?.Profile;
+    /// <summary>
+    /// 地址、模型齐了，再加上 Key（本机服务不需要），才算"配置好了"：缺一样，这个档案划词时必然失败。
+    /// </summary>
+    private static bool IsProfileUsable(ApiProfile profile) => profile.IsConfigured;
 
     internal void SelectSection(int index)
     {
@@ -215,21 +232,29 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
         WordThresholdBox.Text = _settings.WordThreshold.ToString(CultureInfo.CurrentCulture);
 
         SelectComboItemByContent(TriggerKeyCombo, _settings.TriggerKey);
-        DoubleTapSlider.Value = Math.Clamp(_settings.DoubleTapIntervalMs, 150, 800);
-        DoubleTapValueText.Text = $"{(int)DoubleTapSlider.Value} ms";
+        DoubleTapIntervalBox.Text = Math
+            .Clamp(_settings.DoubleTapIntervalMs, 150, 800)
+            .ToString(CultureInfo.CurrentCulture);
         MaxKeyHoldBox.Text = _settings.MaxKeyHoldMs.ToString(CultureInfo.CurrentCulture);
         ClipboardWaitBox.Text = _settings.ClipboardWaitMs.ToString(CultureInfo.CurrentCulture);
         EnabledCheckBox.IsChecked = _settings.Enabled;
 
-        RefreshBlacklist();
         LongTextThresholdBox.Text = _settings.LongTextThreshold.ToString(CultureInfo.CurrentCulture);
         PrivacyModeCheckBox.IsChecked = _settings.PrivacyMode;
         DetailedLoggingCheckBox.IsChecked = _settings.DetailedLogging;
 
-        StartWithWindowsCheckBox.IsChecked = _settings.StartWithWindows;
-        PopupFontSizeBox.Text = _settings.PopupFontSize.ToString("0.##", CultureInfo.CurrentCulture);
-        PopupMaxWidthBox.Text = _settings.PopupMaxWidth.ToString("0.##", CultureInfo.CurrentCulture);
-        PopupMaxHeightBox.Text = _settings.PopupMaxHeight.ToString("0.##", CultureInfo.CurrentCulture);
+        _startWithWindows = _settings.StartWithWindows;
+        RefreshStartWithWindows();
+        _popupMaxWidth = _settings.PopupMaxWidth;
+        _popupMaxHeight = _settings.PopupMaxHeight;
+        _popupFontSize = _settings.PopupFontSize;
+        _popupThemeName = PopupThemes.IsKnown(_settings.PopupTheme)
+            ? _settings.PopupTheme
+            : PopupThemes.DefaultName;
+        _popupCustomSurface = _settings.PopupCustomSurface;
+        _popupCustomText = _settings.PopupCustomText;
+        RefreshPopupPresets();
+        RefreshPopupThemes();
         StreamFallbackDelayBox.Text = _settings.StreamFallbackDelayMs.ToString(CultureInfo.CurrentCulture);
 
         AboutVersionText.Text = $"v{UpdateChecker.CurrentVersion.ToString(3)}";
@@ -252,17 +277,27 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
 
         try
         {
-            ReleaseInfo? release = await _updateService.CheckManuallyAsync(CancellationToken.None);
-            if (release is null)
+            UpdateCheckResult result = await _updateService.CheckManuallyAsync(CancellationToken.None);
+            string current = UpdateChecker.CurrentVersion.ToString(3);
+            switch (result.Status)
             {
-                UpdateStatusText.Text =
-                    $"已经是最新版本 {UpdateChecker.CurrentVersion.ToString(3)}。"
-                    + "（如果你在国内且没开代理，也可能是连不上 GitHub —— 详情见日志。）";
-                return;
+                case UpdateCheckStatus.UpdateAvailable when result.Release is { } release:
+                    UpdateStatusText.Text = $"发现新版本 {release.Version.ToString(3)}。";
+                    _showUpdateWindow(release);
+                    break;
+                case UpdateCheckStatus.UpToDate:
+                    UpdateStatusText.Text = $"已经是最新版本 {current}。";
+                    break;
+                case UpdateCheckStatus.NoRelease:
+                    UpdateStatusText.Text =
+                        $"暂时查不到发布信息：发布页面不存在，或者还没有发布过正式版本。当前版本 {current}。";
+                    break;
+                default:
+                    UpdateStatusText.Text =
+                        $"检查更新没有完成：{result.Detail ?? "原因不明"}。"
+                        + "如果你在国内且没开代理，多半是连不上 GitHub。当前版本 " + current + "。";
+                    break;
             }
-
-            UpdateStatusText.Text = $"发现新版本 {release.Version.ToString(3)}。";
-            _showUpdateWindow(release);
         }
         catch (Exception exception)
         {
@@ -290,12 +325,10 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
                 || !TryReadInt(RequestTimeoutBox, "请求超时", 2, 15, out int requestTimeout)
                 || !TryReadInt(FirstTokenTimeoutBox, "首字超时", 1, 10, out int firstTokenTimeout)
                 || !TryReadInt(WordThresholdBox, "词典模式词数阈值", 1, 8, out int wordThreshold)
+                || !TryReadInt(DoubleTapIntervalBox, "双击间隔", 150, 800, out int doubleTapInterval)
                 || !TryReadInt(MaxKeyHoldBox, "单次按键最长时长", 1, 5_000, out int maxKeyHold)
                 || !TryReadInt(ClipboardWaitBox, "取词等待时间", 100, 1_000, out int clipboardWait)
-                || !TryReadInt(LongTextThresholdBox, "长文本二次确认阈值", 0, 20_000, out int longTextThreshold)
-                || !TryReadDouble(PopupFontSizeBox, "浮窗字号", 10, 24, out double popupFontSize)
-                || !TryReadDouble(PopupMaxWidthBox, "浮窗最大宽度", 260, 900, out double popupMaxWidth)
-                || !TryReadDouble(PopupMaxHeightBox, "浮窗最大高度", 180, 900, out double popupMaxHeight)
+                || !TryReadInt(LongTextThresholdBox, "长文本二次确认阈值", 0, AppSettings.MaxTranslatableChars, out int longTextThreshold)
                 || !TryReadInt(StreamFallbackDelayBox, "流式回退延迟", 0, 10_000, out int streamDelay))
             {
                 return false;
@@ -340,6 +373,16 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
                 if (connectionEdited)
                 {
                     profileNameChanged = true;
+
+                    // 连接信息一改，上一次的检测结论就作废了 —— 否则会出现
+                    // 「用对的 Key 测通过、然后改成错的 Key 也能添加」这种漏洞。
+                    if (_draftProfile is not null)
+                    {
+                        _draftTestPassed = false;
+                        _testResults.Clear();
+                        TestProfileButton.Content = "开始检测";
+                        TestStatusText.Text = "连接信息改过了，需要重新检测一次。";
+                    }
                 }
             }
 
@@ -347,17 +390,20 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             _settings.FallbackLanguage = FallbackLanguageBox.Text.Trim();
             _settings.WordThreshold = wordThreshold;
             _settings.TriggerKey = SelectedComboContent(TriggerKeyCombo, "Ctrl");
-            _settings.DoubleTapIntervalMs = (int)Math.Round(DoubleTapSlider.Value);
+            _settings.DoubleTapIntervalMs = doubleTapInterval;
             _settings.MaxKeyHoldMs = maxKeyHold;
             _settings.ClipboardWaitMs = clipboardWait;
             _settings.Enabled = EnabledCheckBox.IsChecked == true;
             _settings.LongTextThreshold = longTextThreshold;
             _settings.PrivacyMode = PrivacyModeCheckBox.IsChecked == true;
             _settings.DetailedLogging = DetailedLoggingCheckBox.IsChecked == true;
-            _settings.StartWithWindows = StartWithWindowsCheckBox.IsChecked == true;
-            _settings.PopupFontSize = popupFontSize;
-            _settings.PopupMaxWidth = popupMaxWidth;
-            _settings.PopupMaxHeight = popupMaxHeight;
+            _settings.StartWithWindows = _startWithWindows;
+            _settings.PopupFontSize = _popupFontSize;
+            _settings.PopupMaxWidth = _popupMaxWidth;
+            _settings.PopupMaxHeight = _popupMaxHeight;
+            _settings.PopupTheme = _popupThemeName;
+            _settings.PopupCustomSurface = _popupCustomSurface;
+            _settings.PopupCustomText = _popupCustomText;
             _settings.StreamFallbackDelayMs = streamDelay;
             _settings.AutoCheckUpdates = AutoCheckUpdatesCheckBox.IsChecked == true;
 
@@ -369,15 +415,20 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
 
             Logger.SetApiKeys(_settings.Profiles.Select(item => item.ApiKey));
             Logger.Info("设置", "设置窗口中的修改已保存并立即生效。");
-            if (_feedbackReady)
+            // 三个浮窗数值刚才可能被手改过，预设高亮要跟着走，不能停在旧的那套上。
+            RefreshPopupPresets();
+            // 草稿期间这两件都要跳过：它还没入库，说"已自动保存"是骗人的
+            // （返回时可能就没了）；刷新网格也只会把详情页标题冲回自动生成的名字。
+            if (_feedbackReady && _draftProfile is null)
             {
                 ShowTemporaryStatus("已自动保存");
             }
-            if (profileNameChanged)
+            if (profileNameChanged && _draftProfile is null)
             {
                 RefreshProfiles();
             }
 
+            UpdateProfileButtons();
             _settingsChanged(changeKind);
             return true;
         }
@@ -394,11 +445,20 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
     private void RefreshProfiles(string? selectProfileId = null)
     {
         string? desired = selectProfileId ?? SelectedProfile?.Id ?? _settings.CurrentProfileId;
-        List<ProfileListItem> items = _settings.Profiles
-            .Select(profile => new ProfileListItem(
-                profile,
-                string.Equals(profile.Id, _settings.CurrentProfileId, StringComparison.Ordinal)))
-            .ToList();
+
+        // 「备用 N」的 N 按列表顺序数，当前那个不占号 —— 卡片上的编号要和实际回退次序一致。
+        List<ProfileListItem> items = [];
+        int backupOrder = 0;
+        foreach (ApiProfile profile in _settings.Profiles)
+        {
+            bool isCurrent = string.Equals(profile.Id, _settings.CurrentProfileId, StringComparison.Ordinal);
+            items.Add(new ProfileListItem(profile, isCurrent, isCurrent ? 0 : ++backupOrder));
+        }
+
+        ProfileListItem? currentItem = items.FirstOrDefault(item => item.IsCurrent);
+        ProfileOverviewCaption.Text = currentItem is null
+            ? "还没有指定当前模型。"
+            : $"当前由「{currentItem.Name}」· {currentItem.Detail} 提供翻译；失败时按下面的先后顺序回退。";
 
         bool previousLoading = _loading;
         _loading = true;
@@ -433,6 +493,7 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             return;
         }
 
+        ProfileDetailTitle.Text = profile.Name;
         ProfileNameBox.Text = profile.Name;
         ProviderPresetCombo.SelectedItem = ProviderPresets.IsKnown(profile.ProviderPreset)
             ? profile.ProviderPreset
@@ -450,7 +511,7 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
         FirstTokenTimeoutBox.Text = profile.FirstTokenTimeoutSeconds.ToString(CultureInfo.CurrentCulture);
         ExtraRequestBodyBox.Text = profile.ExtraRequestBody;
         ModelParamsCaption.Text =
-            $"下面这些参数只作用于档案「{profile.Name}」。要改别的档案，先去「服务商档案」里选中它。";
+            $"下面这些参数只作用于「{profile.Name}」。要改别的模型，回到「全部模型」点那张卡片。";
 
         UpdateBaseUrlEditability();
         UpdateFailureCard(profile);
@@ -480,16 +541,19 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
 
     private void UpdateProfileButtons()
     {
-        int index = ProfilesList.SelectedIndex;
         bool selected = SelectedProfile is not null;
-        MoveProfileUpButton.IsEnabled = selected && index > 0;
-        MoveProfileDownButton.IsEnabled = selected && index >= 0 && index < _settings.Profiles.Count - 1;
         DeleteProfileButton.IsEnabled = selected && _settings.Profiles.Count > 1;
         SetCurrentProfileButton.IsEnabled = selected
             && !string.Equals(SelectedProfile!.Id, _settings.CurrentProfileId, StringComparison.Ordinal);
         TestProfileButton.IsEnabled = selected && _testCancellation is null;
+        AddDraftButton.IsEnabled = _draftProfile is not null && _draftTestPassed;
     }
 
+    /// <summary>
+    /// 卡片就是入口：点一张卡片 = 选中它 = 进入它的详情。
+    /// <see cref="RefreshProfiles"/> 里的程序性选中被 <c>_loading</c> 挡住，
+    /// 所以启动、删除、上下移这些场景不会误把用户拽进详情页。
+    /// </summary>
     private void ProfilesList_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_loading)
@@ -509,18 +573,277 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
         }
 
         UpdateProfileButtons();
+
+        // 这里刻意不跳详情：ListBox 是按下鼠标就改选中的，若在这里跳转，
+        // 用户刚要拖动卡片，网格已经被详情页顶掉了。跳转放到"确认不是拖动"的抬起时刻。
+    }
+
+    // ==================== 卡片拖动排序 ====================
+
+    private void ProfilesList_OnPreviewMouseLeftButtonDown(
+        object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        _cardDragStart = e.GetPosition(null);
+        _cardDragStarted = false;
+        _cardDragCandidate = FindAncestor<System.Windows.Controls.ListBoxItem>(
+            e.OriginalSource as DependencyObject)?.DataContext as ProfileListItem;
+    }
+
+    private void ProfilesList_OnPreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (_cardDragStarted
+            || _cardDragCandidate is null
+            || e.LeftButton != System.Windows.Input.MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        System.Windows.Vector moved = e.GetPosition(null) - _cardDragStart;
+        if (Math.Abs(moved.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(moved.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        // 超过系统阈值才算拖动，否则手抖一两像素就再也点不开详情了。
+        _cardDragStarted = true;
+        System.Windows.DragDrop.DoDragDrop(ProfilesList, _cardDragCandidate, System.Windows.DragDropEffects.Move);
+    }
+
+    private void ProfilesList_OnMouseLeftButtonUp(
+        object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (!_cardDragStarted && _cardDragCandidate is not null)
+        {
+            ShowProfileDetail();
+        }
+
+        _cardDragCandidate = null;
+        _cardDragStarted = false;
+    }
+
+    private void ProfilesList_OnDragOver(object sender, System.Windows.DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(typeof(ProfileListItem))
+            ? System.Windows.DragDropEffects.Move
+            : System.Windows.DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void ProfilesList_OnDrop(object sender, System.Windows.DragEventArgs e)
+    {
+        ExecuteUiAction("拖动调整模型顺序", () =>
+        {
+            if (e.Data.GetData(typeof(ProfileListItem)) is not ProfileListItem dragged)
+            {
+                return;
+            }
+
+            int from = _settings.Profiles.IndexOf(dragged.Profile);
+            if (from < 0)
+            {
+                return;
+            }
+
+            int insertAt;
+            var target = FindAncestor<System.Windows.Controls.ListBoxItem>(
+                e.OriginalSource as DependencyObject);
+            if (target?.DataContext is ProfileListItem targetItem)
+            {
+                int targetIndex = _settings.Profiles.IndexOf(targetItem.Profile);
+                if (targetIndex < 0 || targetIndex == from)
+                {
+                    return;
+                }
+
+                // 落在目标卡片左半边就插它前面，右半边就插它后面 —— 和文件管理器一致。
+                insertAt = e.GetPosition(target).X > target.ActualWidth / 2
+                    ? targetIndex + 1
+                    : targetIndex;
+            }
+            else
+            {
+                // 丢在空白处 = 放到队尾。
+                insertAt = _settings.Profiles.Count;
+            }
+
+            _settings.Profiles.RemoveAt(from);
+            if (from < insertAt)
+            {
+                insertAt--;
+            }
+
+            _settings.Profiles.Insert(Math.Clamp(insertAt, 0, _settings.Profiles.Count), dragged.Profile);
+            RefreshProfiles(dragged.Profile.Id);
+            SaveAll();
+            ShowTemporaryStatus("顺序已保存，卡片顺序就是划词失败时的回退顺序");
+        });
+    }
+
+    /// <summary>拖动是鼠标专属操作，键盘用户走这里：Enter 打开，Alt+← / Alt+→ 调顺序。</summary>
+    private void ProfilesList_OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (ProfilesList.SelectedItem is not ProfileListItem)
+        {
+            return;
+        }
+
+        if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Space)
+        {
+            ShowProfileDetail();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.KeyboardDevice.Modifiers != System.Windows.Input.ModifierKeys.Alt)
+        {
+            return;
+        }
+
+        if (e.SystemKey is System.Windows.Input.Key.Left or System.Windows.Input.Key.Up)
+        {
+            MoveSelectedProfile(-1);
+            e.Handled = true;
+        }
+        else if (e.SystemKey is System.Windows.Input.Key.Right or System.Windows.Input.Key.Down)
+        {
+            MoveSelectedProfile(1);
+            e.Handled = true;
+        }
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? source)
+        where T : DependencyObject
+    {
+        while (source is not null and not T)
+        {
+            source = System.Windows.Media.VisualTreeHelper.GetParent(source);
+        }
+
+        return source as T;
+    }
+
+    /// <summary>
+    /// 返回全部模型。草稿已经通过检测就顺手收下（它已经是个能用的模型，没道理丢掉），
+    /// 没通过就丢弃 —— 这正是"没配置好的模型返回即不存在"。
+    /// </summary>
+    private void BackToProfileGrid_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_draftProfile is { } draft && _draftTestPassed)
+        {
+            CommitDraftProfile(draft);
+            return;
+        }
+
+        ShowProfileGrid();
+    }
+
+    private void AddDraftButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        ExecuteUiAction("添加服务商档案", () =>
+        {
+            if (_draftProfile is not { } draft)
+            {
+                return;
+            }
+
+            if (!_draftTestPassed)
+            {
+                ShowValidationError(IsProfileUsable(draft)
+                    ? "先点「开始检测」，检测通过之后才能添加。"
+                    : "接口地址、API Key 和模型名称都填好，再点「开始检测」。");
+                FocusFirstEmptyDraftField(draft);
+                return;
+            }
+
+            CommitDraftProfile(draft);
+        });
+    }
+
+    private void CommitDraftProfile(ApiProfile draft)
+    {
+        _settings.Profiles.Add(draft);
+        _draftProfile = null;
+        RefreshProfiles(draft.Id);
+        SaveAll();
+        ShowProfileGrid();
+    }
+
+    private void FocusFirstEmptyDraftField(ApiProfile draft)
+    {
+        if (string.IsNullOrWhiteSpace(draft.BaseUrl))
+        {
+            BaseUrlBox.Focus();
+        }
+        else if (string.IsNullOrWhiteSpace(draft.ApiKey) && !ApiProfile.IsLocalAddress(draft.BaseUrl))
+        {
+            ApiKeyPasswordBox.Focus();
+        }
+        else if (string.IsNullOrWhiteSpace(draft.Model))
+        {
+            ModelCombo.Focus();
+        }
+        else
+        {
+            // 三项都填了，缺的是那一次检测，焦点就该落在检测按钮上。
+            TestProfileButton.Focus();
+        }
+    }
+
+    private void ShowProfileGrid()
+    {
+        _draftProfile = null;
+        _draftTestPassed = false;
+        ProfileDetailView.Visibility = Visibility.Collapsed;
+        ProfileGridView.Visibility = Visibility.Visible;
+        ProfilesSection.ScrollToTop();
+    }
+
+    /// <summary>打开某个<b>已存在</b>模型的详情。</summary>
+    private void ShowProfileDetail()
+    {
+        _draftProfile = null;
+        EnterDetailView(isDraft: false);
+    }
+
+    /// <summary>打开「新建模型」的草稿详情。</summary>
+    private void ShowProfileDraft() => EnterDetailView(isDraft: true);
+
+    private void EnterDetailView(bool isDraft)
+    {
+        ProfileActionButtons.Visibility = isDraft ? Visibility.Collapsed : Visibility.Visible;
+        AddDraftButton.Visibility = isDraft ? Visibility.Visible : Visibility.Collapsed;
+        DraftHintText.Visibility = isDraft ? Visibility.Visible : Visibility.Collapsed;
+        DetailTitleSpacer.Visibility = isDraft ? Visibility.Collapsed : Visibility.Visible;
+        ProfileGridView.Visibility = Visibility.Collapsed;
+        ProfileDetailView.Visibility = Visibility.Visible;
+        ProfilesSection.ScrollToTop();
     }
 
     private void AddProfileButton_OnClick(object sender, RoutedEventArgs e)
     {
         ExecuteUiAction("新建服务商档案", () =>
         {
-            ApiProfile profile = ApiProfile.CreateFromPreset(
+            // 只做草稿，不入库、不落盘、不刷新卡片网格。
+            // 它要么被填齐后由 CommitDraftProfile 收下，要么随返回一起消失。
+            _draftProfile = ApiProfile.CreateFromPreset(
                 ProviderPresets.CustomName,
                 _settings.GenerateUniqueProfileName("新建服务商"));
-            _settings.Profiles.Add(profile);
-            RefreshProfiles(profile.Id);
-            SaveAll();
+            _draftTestPassed = false;
+
+            bool previousLoading = _loading;
+            _loading = true;
+            try
+            {
+                LoadProfileDetails();
+            }
+            finally
+            {
+                _loading = previousLoading;
+            }
+
+            ShowProfileDraft();
+            ProfileDetailTitle.Text = "新建模型";
             ProfileNameBox.Focus();
             ProfileNameBox.SelectAll();
         });
@@ -565,13 +888,12 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
 
             RefreshProfiles(_settings.CurrentProfileId);
             SaveAll();
+            // 刚删掉的就是正在看的那张卡，详情页已经没有对应对象，退回网格。
+            ShowProfileGrid();
         });
     }
 
-    private void MoveProfileUpButton_OnClick(object sender, RoutedEventArgs e) => MoveSelectedProfile(-1);
-
-    private void MoveProfileDownButton_OnClick(object sender, RoutedEventArgs e) => MoveSelectedProfile(1);
-
+    /// <summary>顺序调整的实现。鼠标走拖放，键盘走 Alt+方向键，两条路都汇到这里。</summary>
     private void MoveSelectedProfile(int offset)
     {
         ExecuteUiAction("调整档案顺序", () =>
@@ -644,8 +966,14 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
         }
 
         profile.Name = name;
-        RefreshProfiles(profile.Id);
-        SaveAll();
+        ProfileDetailTitle.Text = name;
+
+        // 草稿还不在列表里，刷新网格既没意义也会白白重建一次 ItemsSource。
+        if (_draftProfile is null)
+        {
+            RefreshProfiles(profile.Id);
+            SaveAll();
+        }
     }
 
     private async void TestProfileButton_OnClick(object sender, RoutedEventArgs e)
@@ -676,8 +1004,25 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             var progress = new Progress<DiagnosticResult>(_testResults.Add);
             IReadOnlyList<DiagnosticResult> results = await runner.RunAsync(progress, _testCancellation.Token);
 
+            // 检测最长要跑 90 秒，期间用户随时可能切到别的档案。
+            // 不比对就会把档案 A 的检测结论显示成档案 B 的体检报告。
+            if (!ReferenceEquals(SelectedProfile, profile))
+            {
+                Logger.Info("服务商测试", $"检测结束时用户已切换档案，档案「{profile.Name}」的结果已丢弃。");
+                _testResults.Clear();
+                TestStatusText.Text = string.Empty;
+                return;
+            }
+
             int failed = results.Count(result => result.Status == DiagnosticStatus.Failed);
             int warnings = results.Count(result => result.Status == DiagnosticStatus.Warning);
+
+            // 警告不算不通过：模型名不在官方列表里这类提醒很常见，但翻译照样能跑。
+            if (_draftProfile is not null)
+            {
+                _draftTestPassed = failed == 0;
+            }
+
             TestStatusText.Text = failed > 0
                 ? $"有 {failed} 项没通过。看上面标 ✗ 的那一行就知道卡在哪。"
                 : warnings > 0
@@ -706,34 +1051,59 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
         }
     }
 
-    private void CopyReportButton_OnClick(object sender, RoutedEventArgs e)
+    private async void CopyReportButton_OnClick(object sender, RoutedEventArgs e)
     {
-        ExecuteUiAction("复制诊断报告", () =>
+        try
         {
             if (_lastTestRunner is null || _testResults.Count == 0)
             {
                 return;
             }
 
-            System.Windows.Clipboard.SetText(_lastTestRunner.BuildReport(_testResults));
+            await ClipboardService.SetTextAsync(_lastTestRunner.BuildReport(_testResults));
             ShowTemporaryStatus("诊断报告已复制（API Key 已脱敏）");
-        });
+        }
+        catch (ClipboardUnavailableException exception)
+        {
+            Logger.Error("设置", "复制诊断报告失败。", exception);
+            ShowValidationError("剪贴板正被其他程序占用，没复制上，稍等一下再点一次。");
+        }
+        catch (Exception exception)
+        {
+            Logger.Error("设置", "复制诊断报告失败。", exception);
+            ShowValidationError("诊断报告没有复制成功，详情已记录到日志。");
+        }
     }
 
     // ==================== 翻译模式 ====================
 
     private void RefreshModes(string? selectedModeId = null)
     {
-        string desiredMode = selectedModeId ?? _settings.CurrentModeId;
-        ModesList.ItemsSource = null;
-        ModesList.ItemsSource = _settings.Modes;
-        ModesList.SelectedItem = _settings.Modes.FirstOrDefault(mode => mode.Id == desiredMode)
-            ?? _settings.Modes.FirstOrDefault();
+        string desiredMode = selectedModeId ?? SelectedMode?.Id ?? _settings.CurrentModeId;
+        List<ModeListItem> items = _settings.Modes
+            .Select(mode => new ModeListItem(
+                mode,
+                string.Equals(mode.Id, _settings.CurrentModeId, StringComparison.Ordinal)))
+            .ToList();
 
-        TranslationMode? current = _settings.Modes.FirstOrDefault(mode => mode.Id == _settings.CurrentModeId);
+        bool previousLoading = _loading;
+        _loading = true;
+        try
+        {
+            ModesList.ItemsSource = null;
+            ModesList.ItemsSource = items;
+            ModesList.SelectedItem = items.FirstOrDefault(item => item.Mode.Id == desiredMode)
+                ?? items.FirstOrDefault();
+        }
+        finally
+        {
+            _loading = previousLoading;
+        }
+
+        ModeListItem? current = items.FirstOrDefault(item => item.IsCurrent);
         CurrentModeStatusText.Text = current is null
-            ? "当前使用：（未选择）"
-            : $"当前使用：{current.Name}";
+            ? "还没有选定当前模式。"
+            : $"当前由「{current.Mode.Name}」决定译文的语气和取舍。";
 
         LoadModeDetails();
         UpdateModeButtons();
@@ -741,49 +1111,30 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
 
     private void LoadModeDetails()
     {
-        if (ModesList.SelectedItem is TranslationMode mode)
+        if (SelectedMode is { } mode)
         {
             ModeNameBox.Text = mode.Name;
             ModePromptBox.Text = mode.SystemPromptTemplate;
+            ModeDeepPromptBox.Text = mode.DeepPromptTemplate;
         }
         else
         {
             ModeNameBox.Text = string.Empty;
             ModePromptBox.Text = string.Empty;
-        }
-    }
-
-    private void RefreshBlacklist()
-    {
-        BlacklistList.ItemsSource = null;
-        BlacklistList.ItemsSource = _settings.AppBlacklist;
-    }
-
-    private void RefreshProcessList()
-    {
-        var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (Process process in Process.GetProcesses())
-        {
-            using (process)
-            {
-                try
-                {
-                    if (!string.IsNullOrWhiteSpace(process.ProcessName)
-                        && process.Id != Environment.ProcessId)
-                    {
-                        names.Add(process.ProcessName);
-                    }
-                }
-                catch (Exception exception)
-                {
-                    Logger.Warning("设置", $"读取一个运行中程序的名称失败，已跳过：{exception.Message}");
-                }
-            }
+            ModeDeepPromptBox.Text = string.Empty;
         }
 
-        string currentText = RunningProcessesCombo.Text;
-        RunningProcessesCombo.ItemsSource = names;
-        RunningProcessesCombo.Text = currentText;
+        UpdateDeepPromptNotice();
+    }
+
+    /// <summary>
+    /// 深度模板为空时，<see cref="DeepPromptBuilder"/> 会静默回退到「通用」那一套 ——
+    /// 用户写的提示词对深度翻译一点作用都没有，而界面上原本没有任何迹象。
+    /// </summary>
+    private void UpdateDeepPromptNotice()
+    {
+        bool missing = SelectedMode is { } mode && string.IsNullOrWhiteSpace(mode.DeepPromptTemplate);
+        DeepPromptMissingNotice.Visibility = missing ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void UpdateExtraRequestBodyValidation()
@@ -829,23 +1180,16 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
 
     private void UpdateModeButtons()
     {
-        bool selected = ModesList.SelectedItem is TranslationMode;
-        bool builtIn = ModesList.SelectedItem is TranslationMode { IsBuiltIn: true };
-        bool isCurrent = ModesList.SelectedItem is TranslationMode mode && mode.Id == _settings.CurrentModeId;
+        bool selected = SelectedMode is not null;
+        bool builtIn = SelectedMode is { IsBuiltIn: true };
+        bool isCurrent = SelectedMode is { } mode
+            && string.Equals(mode.Id, _settings.CurrentModeId, StringComparison.Ordinal);
         ApplyModeButton.IsEnabled = selected && !isCurrent;
         DeleteModeButton.IsEnabled = selected && !builtIn;
         RestoreModeButton.IsEnabled = builtIn;
         ModeNameBox.IsEnabled = selected;
         ModePromptBox.IsEnabled = selected;
-    }
-
-    private void ResetDoubleTapTest()
-    {
-        _testTapCount = 0;
-        DoubleTapTestText.Text = "在这里双击触发键试试";
-        DoubleTapTestText.SetResourceReference(
-            System.Windows.Controls.TextBlock.ForegroundProperty,
-            "Brush.Text");
+        ModeDeepPromptBox.IsEnabled = selected;
     }
 
     private bool TryReadInt(TextBox box, string fieldName, int minimum, int maximum, out int value)
@@ -1029,11 +1373,15 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(apiKey))
+            if (string.IsNullOrWhiteSpace(apiKey) && !uri.IsLoopback)
             {
                 ShowValidationError("请先填写 API Key，再拉取模型。");
                 return;
             }
+
+            // 请求期间按钮是禁用的，但档案列表没有禁用：用户完全可能在等待时切到别的档案。
+            // 记下发起这次请求的档案，结果落地前比对，避免把 A 服务商的模型列表灌进 B 档案。
+            ApiProfile? requestedProfile = SelectedProfile;
 
             _modelFetchCancellation?.Cancel();
             _modelFetchCancellation?.Dispose();
@@ -1047,6 +1395,12 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             IReadOnlyList<string> models = await Task.Run(
                 () => OpenAiCompatibleClient.FetchModelsAsync(baseUrl, apiKey, cancellationToken),
                 cancellationToken);
+            if (!ReferenceEquals(SelectedProfile, requestedProfile))
+            {
+                Logger.Info("设置", "模型列表返回时用户已切换档案，本次结果已丢弃，避免灌进别的档案。");
+                return;
+            }
+
             if (models.Count == 0)
             {
                 System.Windows.MessageBox.Show(
@@ -1076,7 +1430,7 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
         {
             Logger.Error("设置", "拉取可用模型失败。", exception);
             System.Windows.MessageBox.Show(
-                "该服务商不支持列出模型，请到官网查看模型名后手动填写。",
+                DescribeModelFetchFailure(exception),
                 "拉取可用模型",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -1095,6 +1449,26 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             FetchModelsButton.IsEnabled = true;
             FetchModelsButton.Content = "拉取可用模型";
         }
+    }
+
+    /// <summary>
+    /// 拉取模型列表失败时说清楚是哪种失败。以前一律说"该服务商不支持列出模型"，
+    /// Key 填错了（401）也这么说，用户会以为是服务商的问题，转头去官网抄模型名。
+    /// </summary>
+    internal static string DescribeModelFetchFailure(Exception exception)
+    {
+        if (exception is ApiHttpException api
+            && api.Kind is not (ApiErrorKind.EndpointNotFound or ApiErrorKind.BadRequest))
+        {
+            return ErrorMessages.FromException(exception, string.Empty, thinkingDisabled: true).Message;
+        }
+
+        if (exception is HttpRequestException)
+        {
+            return ErrorMessages.FromException(exception, string.Empty, thinkingDisabled: true).Message;
+        }
+
+        return "该服务商不支持列出模型，请到官网查看模型名后手动填写。";
     }
 
     private void ExtraRequestBodyBox_OnTextChanged(object sender, TextChangedEventArgs e)
@@ -1125,7 +1499,7 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
     {
         ExecuteUiAction("切换翻译模式", () =>
         {
-            if (ModesList.SelectedItem is not TranslationMode mode)
+            if (SelectedMode is not { } mode)
             {
                 ShowValidationError("请先在列表中选择要应用的翻译模式。");
                 return;
@@ -1141,11 +1515,88 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
     {
         LoadModeDetails();
         UpdateModeButtons();
+        // 和模型卡片一致：跳详情放到"确认是一次点击"的抬起时刻，不在选中时跳。
+    }
+
+    private void ModesList_OnPreviewMouseLeftButtonDown(
+        object sender, System.Windows.Input.MouseButtonEventArgs e) =>
+        _modeCardPressed = FindAncestor<System.Windows.Controls.ListBoxItem>(
+            e.OriginalSource as DependencyObject)?.DataContext is ModeListItem;
+
+    private void ModesList_OnMouseLeftButtonUp(
+        object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (_modeCardPressed)
+        {
+            ShowModeDetail();
+        }
+
+        _modeCardPressed = false;
+    }
+
+    private void ModesList_OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (ModesList.SelectedItem is ModeListItem
+            && e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Space)
+        {
+            ShowModeDetail();
+            e.Handled = true;
+        }
+    }
+
+    private void BackToModeGrid_OnClick(object sender, RoutedEventArgs e) => ShowModeGrid();
+
+    private void ShowModeGrid()
+    {
+        ModeDetailView.Visibility = Visibility.Collapsed;
+        ModeGridView.Visibility = Visibility.Visible;
+        BehaviorSection.ScrollToTop();
+    }
+
+    private void ShowModeDetail()
+    {
+        ModeGridView.Visibility = Visibility.Collapsed;
+        ModeDetailView.Visibility = Visibility.Visible;
+        BehaviorSection.ScrollToTop();
+    }
+
+    private void ModeDeepPromptBox_OnLostKeyboardFocus(
+        object sender, System.Windows.Input.KeyboardFocusChangedEventArgs e)
+    {
+        if (_loading || SelectedMode is not { } mode)
+        {
+            return;
+        }
+
+        // 允许清空：清掉就是明确表示"回到沿用通用"，提示条会跟着出现。
+        mode.DeepPromptTemplate = ModeDeepPromptBox.Text.Trim();
+        UpdateDeepPromptNotice();
+        RefreshModes(mode.Id);
+        SaveAll();
+    }
+
+    private void CopyDeepPromptFromAuto_OnClick(object sender, RoutedEventArgs e)
+    {
+        ExecuteUiAction("复制通用的深度提示词", () =>
+        {
+            if (SelectedMode is not { } mode)
+            {
+                return;
+            }
+
+            // 反正为空时本来就在用「通用」那一套，复制过来只是把这件事摆到明面上、变得可改。
+            mode.DeepPromptTemplate = BuiltInModes.CreateDefaults()[0].DeepPromptTemplate;
+            ModeDeepPromptBox.Text = mode.DeepPromptTemplate;
+            UpdateDeepPromptNotice();
+            RefreshModes(mode.Id);
+            SaveAll();
+            ShowTemporaryStatus("已复制「通用」的深度提示词，现在可以改了");
+        });
     }
 
     private void ModeNameBox_OnLostKeyboardFocus(object sender, System.Windows.Input.KeyboardFocusChangedEventArgs e)
     {
-        if (_loading || ModesList.SelectedItem is not TranslationMode mode)
+        if (_loading || SelectedMode is not { } mode)
         {
             return;
         }
@@ -1165,7 +1616,7 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
 
     private void ModePromptBox_OnLostKeyboardFocus(object sender, System.Windows.Input.KeyboardFocusChangedEventArgs e)
     {
-        if (_loading || ModesList.SelectedItem is not TranslationMode mode)
+        if (_loading || SelectedMode is not { } mode)
         {
             return;
         }
@@ -1230,7 +1681,7 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
     {
         ExecuteUiAction("删除翻译模式", () =>
         {
-            if (ModesList.SelectedItem is not TranslationMode mode)
+            if (SelectedMode is not { } mode)
             {
                 ShowValidationError("请先选择要删除的翻译模式。");
                 return;
@@ -1270,7 +1721,7 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
     {
         ExecuteUiAction("恢复内置翻译模式", () =>
         {
-            if (ModesList.SelectedItem is not TranslationMode { IsBuiltIn: true } mode)
+            if (SelectedMode is not { IsBuiltIn: true } mode)
             {
                 ShowValidationError("请选择一个内置模式再恢复默认。");
                 return;
@@ -1279,6 +1730,9 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             TranslationMode original = BuiltInModes.CreateDefaults().First(item => item.Id == mode.Id);
             mode.Name = original.Name;
             mode.SystemPromptTemplate = original.SystemPromptTemplate;
+            // 深度模板也要一起恢复：只恢复其中一套，等于把这个模式留在
+            // "浮窗是官方的、深度是我改过的"这种一半一半的状态里。
+            mode.DeepPromptTemplate = original.DeepPromptTemplate;
             RefreshModes(mode.Id);
             SaveAll();
         });
@@ -1288,24 +1742,7 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
     {
         if (!_loading)
         {
-            ResetDoubleTapTest();
             SaveAll(SettingsChangeKind.KeyboardHook);
-        }
-    }
-
-    private void DoubleTapSlider_OnValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        if (DoubleTapValueText is null)
-        {
-            return;
-        }
-
-        DoubleTapValueText.Text = $"{(int)Math.Round(e.NewValue)} ms";
-        if (!_loading)
-        {
-            ResetDoubleTapTest();
-            _triggerSaveTimer.Stop();
-            _triggerSaveTimer.Start();
         }
     }
 
@@ -1317,49 +1754,8 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
 
     private void TriggerTextBox_OnLostKeyboardFocus(object sender, System.Windows.Input.KeyboardFocusChangedEventArgs e)
     {
-        ResetDoubleTapTest();
         SaveAll(SettingsChangeKind.KeyboardHook);
     }
-
-    private void AddBlacklistButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        ExecuteUiAction("添加应用黑名单", () =>
-        {
-            string processName = Path.GetFileNameWithoutExtension(RunningProcessesCombo.Text.Trim());
-            if (string.IsNullOrWhiteSpace(processName))
-            {
-                ShowValidationError("请从列表选择程序，或输入进程名后再添加。");
-                return;
-            }
-
-            if (!_settings.AppBlacklist.Contains(processName, StringComparer.OrdinalIgnoreCase))
-            {
-                _settings.AppBlacklist.Add(processName);
-                _settings.AppBlacklist.Sort(StringComparer.OrdinalIgnoreCase);
-                RefreshBlacklist();
-                SaveAll();
-            }
-        });
-    }
-
-    private void RemoveBlacklistButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        ExecuteUiAction("移除应用黑名单", () =>
-        {
-            if (BlacklistList.SelectedItem is not string selected)
-            {
-                ShowValidationError("请先选择要移除的程序。");
-                return;
-            }
-
-            _settings.AppBlacklist.Remove(selected);
-            RefreshBlacklist();
-            SaveAll();
-        });
-    }
-
-    private void RefreshProcessesButton_OnClick(object sender, RoutedEventArgs e) =>
-        ExecuteUiAction("刷新运行程序列表", RefreshProcessList);
 
     private async void ClearAllHistoryButton_OnClick(object sender, RoutedEventArgs e)
     {
@@ -1442,25 +1838,153 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
         }
     }
 
-    private void StartWithWindowsCheckBox_OnClick(object sender, RoutedEventArgs e)
+    private void StartWithWindowsToggle_OnClick(object sender, RoutedEventArgs e)
     {
         ExecuteUiAction("修改开机自动启动", () =>
         {
-            bool previous = _settings.StartWithWindows;
-            bool enabled = StartWithWindowsCheckBox.IsChecked == true;
-            if (!StartupRegistration.TrySet(enabled, out string? errorMessage))
+            // finally 里一定要刷新：开关的位置现在就是状态本身，
+            // 中途任何一条失败路径（注册表写不进去、保存失败、抛异常）
+            // 都必须把滑块拨回真实状态，否则界面在骗人。
+            try
             {
-                StartWithWindowsCheckBox.IsChecked = previous;
-                ShowValidationError(errorMessage ?? "开机自动启动设置没有生效。");
-                return;
+                bool previous = _startWithWindows;
+
+                // CheckBox 的 Click 是在 IsChecked 翻转之后才触发的，所以这里读它就是用户要的新值。
+                bool enabled = StartWithWindowsToggle.IsChecked == true;
+                if (!StartupRegistration.TrySet(enabled, out string? errorMessage))
+                {
+                    ShowValidationError(errorMessage ?? "开机自动启动设置没有生效。");
+                    return;
+                }
+
+                // 注册表已经改了，配置没存住就得原样退回去，否则两边说法不一致。
+                _startWithWindows = enabled;
+                if (!SaveAll())
+                {
+                    StartupRegistration.TrySet(previous, out _);
+                    _startWithWindows = previous;
+                }
+            }
+            finally
+            {
+                RefreshStartWithWindows();
+            }
+        });
+    }
+
+    /// <summary>
+    /// 点一套浮窗大小或字号预设：把数值填进「自定义」里的输入框再走正常的保存流程，
+    /// 这样校验、落盘和"已自动保存"提示都跟手改数字走同一条路，不会出现两套行为。
+    /// </summary>
+    private void PopupPresetButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not PopupChoiceItem item)
+        {
+            return;
+        }
+
+        ExecuteUiAction("应用浮窗预设", () =>
+        {
+            double previousWidth = _popupMaxWidth;
+            double previousHeight = _popupMaxHeight;
+            double previousFont = _popupFontSize;
+
+            if (item.Size is { } size)
+            {
+                _popupMaxWidth = size.MaxWidth;
+                _popupMaxHeight = size.MaxHeight;
+            }
+
+            if (item.Font is { } font)
+            {
+                _popupFontSize = font.FontSize;
             }
 
             if (!SaveAll())
             {
-                StartupRegistration.TrySet(previous, out _);
-                StartWithWindowsCheckBox.IsChecked = previous;
+                _popupMaxWidth = previousWidth;
+                _popupMaxHeight = previousHeight;
+                _popupFontSize = previousFont;
             }
+
+            RefreshPopupPresets();
         });
+    }
+
+    /// <summary>
+    /// 点一套浮窗配色。配色没有对应的输入框，选中项本身就是"控件状态"，
+    /// 所以先记在字段里，再由 SaveAll 统一写进设置 —— 和其它字段保持同一条保存路径。
+    /// </summary>
+    private void PopupThemeButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not PopupThemeItem item)
+        {
+            return;
+        }
+
+        ExecuteUiAction("切换浮窗配色", () =>
+        {
+            string previous = _popupThemeName;
+            _popupThemeName = item.Theme.Name;
+            if (!SaveAll())
+            {
+                _popupThemeName = previous;
+            }
+
+            RefreshPopupThemes();
+        });
+    }
+
+    /// <summary>重画配色按钮。选了「自定义」时三个内置的都不高亮。</summary>
+    private void RefreshPopupThemes()
+    {
+        PopupThemeList.ItemsSource = PopupThemes.All
+            .Select(theme => new PopupThemeItem(
+                theme,
+                string.Equals(theme.Name, _popupThemeName, StringComparison.Ordinal)))
+            .ToList();
+    }
+
+    /// <summary>
+    /// 重画大小和字号两组按钮，高亮当前生效的那一套。
+    /// </summary>
+    private void RefreshPopupPresets()
+    {
+        PopupSizePreset? size = PopupPresets.MatchSize(_settings.PopupMaxWidth, _settings.PopupMaxHeight);
+        PopupFontPreset? font = PopupPresets.MatchFont(_settings.PopupFontSize);
+
+        PopupSizeList.ItemsSource = PopupPresets.Sizes
+            .Select(item => new PopupChoiceItem(
+                item.Name,
+                $"{item.MaxWidth:0}×{item.MaxHeight:0}",
+                item.Description,
+                ReferenceEquals(item, size),
+                item,
+                null))
+            .ToList();
+        PopupFontList.ItemsSource = PopupPresets.Fonts
+            .Select(item => new PopupChoiceItem(
+                item.Name,
+                $"{item.FontSize:0.##} 号字",
+                item.Description,
+                ReferenceEquals(item, font),
+                null,
+                item))
+            .ToList();
+    }
+
+    /// <summary>
+    /// 开机自启动这一行：开关位置表示状态，下面一行说明当前状态的后果。
+    /// <b>读 <c>_startWithWindows</c> 而不是 <c>_settings.StartWithWindows</c></b> ——
+    /// 保存失败时前者会被回退、后者可能已经被 SaveAll 写成了新值，
+    /// 读错那个会让开关显示成一个并没有真正生效的状态。
+    /// </summary>
+    private void RefreshStartWithWindows()
+    {
+        StartWithWindowsStateText.Text = _startWithWindows
+            ? "已启用，登录 Windows 后自动运行"
+            : "已停用，每次开机需要自己启动一次";
+        StartWithWindowsToggle.IsChecked = _startWithWindows;
     }
 
     private void OpenFolderButton_OnClick(object sender, RoutedEventArgs e)
@@ -1482,7 +2006,12 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             Window owner = Window.GetWindow(this)
                 ?? throw new InvalidOperationException("设置视图尚未连接到主窗口。");
             string? path = await HistoryCsvExporter.ExportAsync(
-                _historyRepository, owner, CancellationToken.None);
+                _historyRepository,
+                owner,
+                modeId => _settings.Modes.FirstOrDefault(mode => mode.Id == modeId)?.Name
+                    ?? BuiltInModes.CreateDefaults().FirstOrDefault(mode => mode.Id == modeId)?.Name
+                    ?? modeId,
+                CancellationToken.None);
             if (path is not null)
             {
                 System.Windows.MessageBox.Show(owner, "历史记录已导出。", "导出完成",
@@ -1531,7 +2060,7 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
     /// 档案列表的显示用包装。ApiProfile 是纯数据模型、没有变更通知，
     /// 这里沿用本项目已有的做法：改动后整体重建 ItemsSource。
     /// </summary>
-    private sealed record ProfileListItem(ApiProfile Profile, bool IsCurrent)
+    private sealed record ProfileListItem(ApiProfile Profile, bool IsCurrent, int BackupOrder)
     {
         public string Name => Profile.Name;
 
@@ -1539,8 +2068,103 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             ? "（还没填模型名）"
             : Profile.Model;
 
+        /// <summary>卡片第三行只显示主机名。整条 Base URL 在 216px 卡片里必然被截断，
+        /// 截断后的 "https://open.bigmodel…" 认不出是哪家，主机名反而一眼能认。</summary>
+        public string Host => ExtractHost(Profile.BaseUrl);
+
+        /// <summary>徽章种类，模板按它换配色。失效优先于"当前"：坏了比在用更需要先被看见。</summary>
+        public string BadgeKind => Profile.IsFailed ? "failed" : IsCurrent ? "current" : "backup";
+
+        public string BadgeText => Profile.IsFailed
+            ? "异常"
+            : IsCurrent ? "当前" : $"备用 {BackupOrder}";
+
         public Visibility CurrentVisibility => IsCurrent ? Visibility.Visible : Visibility.Collapsed;
 
         public Visibility FailedVisibility => Profile.IsFailed ? Visibility.Visible : Visibility.Collapsed;
+
+        private static string ExtractHost(string baseUrl)
+        {
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                return "（还没填接口地址）";
+            }
+
+            // 用户手输的地址经常没有协议头，Uri 会因此解析失败，所以补一个再试。
+            string candidate = baseUrl.Contains("://", StringComparison.Ordinal)
+                ? baseUrl
+                : "https://" + baseUrl;
+            return Uri.TryCreate(candidate, UriKind.Absolute, out Uri? uri) && uri.Host.Length > 0
+                ? uri.Host
+                : baseUrl;
+        }
+    }
+
+    /// <summary>模式卡片的显示用包装。做法与档案卡片一致：改动后整体重建 ItemsSource。</summary>
+    private sealed record ModeListItem(TranslationMode Mode, bool IsCurrent)
+    {
+        public string Name => Mode.Name;
+
+        /// <summary>内置模式有写好的一句话摘要；自建的没有，退回提示词开头一小段。</summary>
+        public string Summary =>
+            BuiltInModes.SummaryOrNull(Mode.Id)
+            ?? (string.IsNullOrWhiteSpace(Mode.SystemPromptTemplate)
+                ? "自建模式，还没写提示词"
+                : Excerpt(Mode.SystemPromptTemplate));
+
+        /// <summary>深度模板为空会静默套用「通用」，这个状态比"当前 / 内置"更该被看见。</summary>
+        public string BadgeKind => string.IsNullOrWhiteSpace(Mode.DeepPromptTemplate)
+            ? "deepmissing"
+            : IsCurrent ? "current" : "normal";
+
+        public string BadgeText => string.IsNullOrWhiteSpace(Mode.DeepPromptTemplate)
+            ? "深度未配"
+            : IsCurrent ? "当前" : Mode.IsBuiltIn ? "内置" : "自建";
+
+        private static string Excerpt(string prompt)
+        {
+            // 摘要只取一行，换行一律压成空格 —— 提示词里的换行在卡片上没有意义。
+            string first = prompt.ReplaceLineEndings(" ").Trim();
+            return first.Length <= 34 ? first : first[..34] + "…";
+        }
+    }
+
+    /// <summary>
+    /// 大小 / 字号预设按钮的显示用包装，做法与档案列表一致：选中项变了就整体重建 ItemsSource。
+    /// <paramref name="Size"/> 和 <paramref name="Font"/> 只会有一个非空，点击时按哪个非空来应用。
+    /// </summary>
+    private sealed record PopupChoiceItem(
+        string Name,
+        string Detail,
+        string Description,
+        bool IsSelected,
+        PopupSizePreset? Size,
+        PopupFontPreset? Font)
+    {
+        /// <summary>按钮里是两行排版的 TextBlock，屏幕阅读器需要一句完整的话。</summary>
+        public string AutomationName => $"{Name}预设，{Detail}，{Description}";
+
+        public Visibility CurrentVisibility => IsSelected ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// 浮窗配色按钮的显示用包装。三支画笔是给色板预览用的，
+    /// 在这里一次性建好并冻结，免得每次绑定求值都新建一支。
+    /// </summary>
+    private sealed record PopupThemeItem(PopupTheme Theme, bool IsSelected)
+    {
+        public string Name => Theme.Name;
+
+        public string Description => Theme.Description;
+
+        public System.Windows.Media.SolidColorBrush SurfaceBrush { get; } =
+            PopupThemePalette.Swatch(Theme.Surface);
+
+        public System.Windows.Media.SolidColorBrush OutlineBrush { get; } =
+            PopupThemePalette.Swatch(Theme.Border);
+
+        public string AutomationName => $"{Name}配色，{Description}";
+
+        public Visibility CurrentVisibility => IsSelected ? Visibility.Visible : Visibility.Collapsed;
     }
 }

@@ -71,7 +71,11 @@ public sealed class Database
         [
             ("profile_name", "TEXT"),
             ("prompt_tokens", "INTEGER"),
-            ("completion_tokens", "INTEGER")
+            ("completion_tokens", "INTEGER"),
+            // 缓存命中的时间必须和翻译发生的时间分开记。以前命中缓存会直接改写
+            // created_at，导致历史列表的时间、排序和导出的 CSV 全变成"最后一次命中"的时间，
+            // 三个月前翻的东西今天再划一次就显示成今天，真实时间被永久覆盖。
+            ("last_used_at", "TEXT")
         ];
 
         foreach ((string name, string definition) in added)
