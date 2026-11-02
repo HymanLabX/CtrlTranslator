@@ -1,4 +1,5 @@
 using CtrlTranslator.Diagnostics;
+using CtrlTranslator.Core;
 using CtrlTranslator.Settings;
 
 namespace CtrlTranslator.Translation;
@@ -17,6 +18,7 @@ internal static class PromptBuilder
 
     public static BuiltPrompt Build(string text, AppSettings settings)
     {
+        text = TranslationTextCleaner.Clean(text);
         var targetLanguage = DetectTargetLanguage(text, settings);
         var mode = settings.Modes.FirstOrDefault(item => item.Id == settings.CurrentModeId)
             ?? BuiltInModes.CreateDefaults()[0];
@@ -99,6 +101,7 @@ internal static class PromptBuilder
     /// </remarks>
     internal static bool IsWord(string text, int wordThreshold)
     {
+        text = TranslationTextCleaner.Clean(text);
         string core = TrimSurroundingPunctuation(text);
 
         // 一个字母、一个汉字都没有（纯数字、纯符号）就不是"词"，查词典没有意义。
@@ -152,7 +155,7 @@ internal static class PromptBuilder
     /// </remarks>
     internal static string Headword(string text)
     {
-        string core = TrimSurroundingPunctuation(text.ReplaceLineEndings(" "));
+        string core = TrimSurroundingPunctuation(TranslationTextCleaner.Clean(text).ReplaceLineEndings(" "));
         if (core.Length > 1
             && core[^1] is '.' or '…'
             && core.IndexOf('.') == core.Length - 1

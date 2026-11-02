@@ -1116,6 +1116,16 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
 
     private void LoadModeDetails()
     {
+        TranslationMode? latest = BuiltInModes.CreateDefaults().FirstOrDefault(item => item.Id == SelectedMode?.Id);
+        Visibility defaultVisibility = latest is null ? Visibility.Collapsed : Visibility.Visible;
+        ModePromptProtectionNotice.Visibility = defaultVisibility;
+        DefaultSystemPromptExpander.Visibility = defaultVisibility;
+        DefaultDeepPromptExpander.Visibility = defaultVisibility;
+        DefaultSystemPromptExpander.IsExpanded = false;
+        DefaultDeepPromptExpander.IsExpanded = false;
+        DefaultSystemPromptBox.Text = latest?.SystemPromptTemplate ?? string.Empty;
+        DefaultDeepPromptBox.Text = latest?.DeepPromptTemplate ?? string.Empty;
+
         if (SelectedMode is { } mode)
         {
             ModeNameBox.Text = mode.Name;
@@ -1783,6 +1793,15 @@ public partial class SettingsWindow : System.Windows.Controls.UserControl
             }
 
             TranslationMode original = BuiltInModes.CreateDefaults().First(item => item.Id == mode.Id);
+            if ((mode.SystemPromptTemplate != original.SystemPromptTemplate
+                    || mode.DeepPromptTemplate != original.DeepPromptTemplate)
+                && System.Windows.MessageBox.Show(
+                    "将用本版默认内容替换这个模式的划词和深度提示词，你的修改会被替换。确定恢复吗？",
+                    "恢复默认提示词", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
             mode.Name = original.Name;
             mode.SystemPromptTemplate = original.SystemPromptTemplate;
             // 深度模板也要一起恢复：只恢复其中一套，等于把这个模式留在

@@ -1155,6 +1155,9 @@
                                          LostKeyboardFocus="ModeNameBox_OnLostKeyboardFocus" />
                             </DockPanel>
 
+                            <TextBlock x:Name="ModePromptProtectionNotice" Margin="0,0,0,16"
+                                       Style="{StaticResource RowHint}"
+                                       Text="你修改过的提示词会在升级时保留。可展开对照本版默认内容；「恢复默认」会替换两份提示词。" />
                             <TextBlock Style="{StaticResource SectionLabel}" Margin="0,0,0,4" Text="划词浮窗的提示词" />
                             <TextBlock Margin="0,0,0,10" Style="{StaticResource RowHint}"
                                        Text="决定浮窗里那一句译文怎么写 —— 语气、取舍、什么该保留原样。只出译文，为「快」服务。" />
@@ -1165,6 +1168,15 @@
                                      FontSize="{DynamicResource Size.Body}"
                                      Background="{DynamicResource Brush.Surface}"
                                      LostKeyboardFocus="ModePromptBox_OnLostKeyboardFocus" />
+
+                            <Expander x:Name="DefaultSystemPromptExpander" Margin="0,10,0,0"
+                                      Header="查看本版默认划词提示词（只读）"
+                                      AutomationProperties.Name="查看本版默认划词提示词">
+                                <TextBox x:Name="DefaultSystemPromptBox" Margin="0,8,0,0" Padding="12,10"
+                                         IsReadOnly="True" TextWrapping="Wrap" MaxHeight="200"
+                                         VerticalScrollBarVisibility="Auto"
+                                         AutomationProperties.Name="本版默认划词提示词" />
+                            </Expander>
 
 
                             <TextBlock Style="{StaticResource SectionLabel}" Margin="0,26,0,4" Text="深度翻译的提示词" />
@@ -1177,6 +1189,15 @@
                                      FontSize="{DynamicResource Size.Body}"
                                      Background="{DynamicResource Brush.Surface}"
                                      LostKeyboardFocus="ModeDeepPromptBox_OnLostKeyboardFocus" />
+
+                            <Expander x:Name="DefaultDeepPromptExpander" Margin="0,10,0,0"
+                                      Header="查看本版默认深度提示词（只读）"
+                                      AutomationProperties.Name="查看本版默认深度提示词">
+                                <TextBox x:Name="DefaultDeepPromptBox" Margin="0,8,0,0" Padding="12,10"
+                                         IsReadOnly="True" TextWrapping="Wrap" MaxHeight="200"
+                                         VerticalScrollBarVisibility="Auto"
+                                         AutomationProperties.Name="本版默认深度提示词" />
+                            </Expander>
 
 
                             <!-- 深度模板为空时才出现。这一栏空着不会报错，只会在深度翻译时

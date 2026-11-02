@@ -9,6 +9,9 @@ namespace CtrlTranslator.Data;
 /// </summary>
 public sealed class Database
 {
+    // SQLite 的 Async 方法仍会同步执行；所有数据库工作统一排到后台，并避免本程序内互相抢写锁。
+    private readonly SemaphoreSlim _operations = new(1, 1);
+
     public Database()
     {
         string path = Path.Combine(Logger.DataDirectory, "history.db");
@@ -16,7 +19,7 @@ public sealed class Database
         {
             DataSource = path,
             Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared
+            DefaultTimeout = 3
         };
         ConnectionString = builder.ToString();
     }
@@ -36,19 +39,30 @@ public sealed class Database
         AddMissingColumns(connection);
     }
 
-    public async Task InitializeAsync(CancellationToken cancellationToken)
+    public Task InitializeAsync(CancellationToken cancellationToken) => RunAsync(Initialize, cancellationToken);
+
+    internal async Task<T> RunAsync<T>(Func<T> operation, CancellationToken cancellationToken)
     {
-        await using SqliteConnection connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        await using (SqliteCommand command = connection.CreateCommand())
+        await _operations.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            command.CommandText = SchemaSql;
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            return await Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return operation();
+            }, cancellationToken).ConfigureAwait(false);
         }
-
-        AddMissingColumns(connection);
+        finally
+        {
+            _operations.Release();
+        }
     }
+
+    internal Task RunAsync(Action operation, CancellationToken cancellationToken) => RunAsync(() =>
+    {
+        operation();
+        return true;
+    }, cancellationToken);
 
     /// <summary>
     /// 给老库补上 M5 新增的列。SQLite 的 <c>ALTER TABLE ADD COLUMN</c> 没有 IF NOT EXISTS，

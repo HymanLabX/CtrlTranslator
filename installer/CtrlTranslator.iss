@@ -16,10 +16,10 @@
 ; "为本机所有用户安装"的选项，需要的人可以自己切换（会要求管理员权限）。
 
 #define MyAppName "CtrlTranslator"
-; 版本号默认 1.0.0；CI 发版时会用 /DMyAppVersion=<tag 去掉 v 前缀> 覆盖，
+; 版本号默认 1.0.1；CI 发版时会用 /DMyAppVersion=<tag 去掉 v 前缀> 覆盖，
 ; 这样安装包文件名和 exe 的 Release 版本号能对上。
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.0"
+  #define MyAppVersion "1.0.1"
 #endif
 #define MyAppPublisher "CtrlTranslator"
 #define MyAppExeName "CtrlTranslator.exe"

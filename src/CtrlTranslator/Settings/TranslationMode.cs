@@ -24,4 +24,9 @@ public sealed class TranslationMode
     public string DeepPromptTemplate { get; set; } = string.Empty;
 
     public bool IsBuiltIn { get; set; }
+
+    /// <summary>上次载入时的官方默认模板指纹，用于区分默认内容与用户修改，不保存密钥。</summary>
+    public string? DefaultSystemPromptHash { get; set; }
+
+    public string? DefaultDeepPromptHash { get; set; }
 }

@@ -1,4 +1,5 @@
 using CtrlTranslator.Settings;
+using CtrlTranslator.Core;
 
 namespace CtrlTranslator.Translation;
 
@@ -58,6 +59,7 @@ internal static class DeepPromptBuilder
     /// </remarks>
     public static DeepPlan Plan(string text, AppSettings settings, string? targetLanguageOverride)
     {
+        text = TranslationTextCleaner.Clean(text);
         string targetLanguage = string.IsNullOrWhiteSpace(targetLanguageOverride)
             ? PromptBuilder.DetectTargetLanguage(text, settings)
             : targetLanguageOverride.Trim();
@@ -80,6 +82,8 @@ internal static class DeepPromptBuilder
                 item => string.Equals(item.Id, modeId, StringComparison.Ordinal))
             ?? settings.Modes.FirstOrDefault()
             ?? BuiltInModes.CreateDefaults()[0];
+
+        text = TranslationTextCleaner.Clean(text);
 
         DeepPlan plan = Plan(text, settings, targetLanguageOverride);
         string targetLanguage = plan.TargetLanguage;
