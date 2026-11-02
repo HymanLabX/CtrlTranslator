@@ -23,7 +23,7 @@
 #endif
 #define MyAppPublisher "CtrlTranslator"
 #define MyAppExeName "CtrlTranslator.exe"
-#define MyAppURL "https://github.com/HuayouXiang/CtrlTranslator"
+#define MyAppURL "https://github.com/HymanLabX/CtrlTranslator"
 
 [Setup]
 AppId={{8331A63C-0924-44FD-BE82-9F712630854D}

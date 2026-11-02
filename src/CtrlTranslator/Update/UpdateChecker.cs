@@ -60,7 +60,7 @@ public sealed record UpdateCheckResult(UpdateCheckStatus Status, ReleaseInfo? Re
 /// </remarks>
 public static partial class UpdateChecker
 {
-    private const string Repository = "HuayouXiang/CtrlTranslator";
+    private const string Repository = "HymanLabX/CtrlTranslator";
 
     /// <summary>资产 digest 字段的算法前缀，例如 <c>sha256:858dbde8…</c>。</summary>
     private const string DigestPrefix = "sha256:";
