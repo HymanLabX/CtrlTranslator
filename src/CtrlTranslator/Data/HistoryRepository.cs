@@ -16,15 +16,21 @@ public sealed class HistoryRepository
         _database = database;
     }
 
-    public async Task<TranslationRecord?> FindCacheAndTouchAsync(
+    public Task<TranslationRecord?> FindCacheAndTouchAsync(
+        string cacheKey,
+        CancellationToken cancellationToken) =>
+        _database.RunAsync(() => FindCacheAndTouchAsyncCore(cacheKey, cancellationToken), cancellationToken);
+
+    private TranslationRecord? FindCacheAndTouchAsyncCore(
         string cacheKey,
         CancellationToken cancellationToken)
     {
-        await using SqliteConnection connection = _database.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        using SqliteConnection connection = _database.CreateConnection();
+        connection.Open();
+        cancellationToken.ThrowIfCancellationRequested();
 
         TranslationRecord? record = null;
-        await using (SqliteCommand query = connection.CreateCommand())
+        using (SqliteCommand query = connection.CreateCommand())
         {
             query.CommandText = """
                 SELECT id, cache_key, source_text, result_text, target_lang, mode_id,
@@ -37,8 +43,8 @@ public sealed class HistoryRepository
                 """;
             query.Parameters.AddWithValue("$cache_key", cacheKey);
 
-            await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
-            if (await reader.ReadAsync(cancellationToken))
+            using SqliteDataReader reader = query.ExecuteReader();
+            if (reader.Read())
             {
                 record = ReadRecord(reader);
             }
@@ -52,24 +58,30 @@ public sealed class HistoryRepository
         // 只更新"最后一次用到"的时间，不动 created_at。
         // created_at 是这条翻译真实发生的时刻，历史列表的排序、显示和 CSV 导出都以它为准；
         // 一旦被缓存命中改写，用户看到的时间就是错的，而且原值再也找不回来。
-        await using SqliteCommand touch = connection.CreateCommand();
+        using SqliteCommand touch = connection.CreateCommand();
         touch.CommandText = "UPDATE translations SET last_used_at = $last_used_at WHERE id = $id;";
         touch.Parameters.AddWithValue(
             "$last_used_at",
             DateTime.Now.ToString("O", CultureInfo.InvariantCulture));
         touch.Parameters.AddWithValue("$id", record.Id);
-        await touch.ExecuteNonQueryAsync(cancellationToken);
+        touch.ExecuteNonQuery();
         return record;
     }
 
-    public async Task<long> InsertAsync(
+    public Task<long> InsertAsync(
+        TranslationRecord record,
+        CancellationToken cancellationToken) =>
+        _database.RunAsync(() => InsertAsyncCore(record, cancellationToken), cancellationToken);
+
+    private long InsertAsyncCore(
         TranslationRecord record,
         CancellationToken cancellationToken)
     {
-        await using SqliteConnection connection = _database.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        using SqliteConnection connection = _database.CreateConnection();
+        connection.Open();
+        cancellationToken.ThrowIfCancellationRequested();
 
-        await using SqliteCommand command = connection.CreateCommand();
+        using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO translations (
                 cache_key, source_text, result_text, target_lang, mode_id, model,
@@ -82,17 +94,21 @@ public sealed class HistoryRepository
             SELECT last_insert_rowid();
             """;
         AddRecordParameters(command, record);
-        object? result = await command.ExecuteScalarAsync(cancellationToken);
+        object? result = command.ExecuteScalar();
         return Convert.ToInt64(result, CultureInfo.InvariantCulture);
     }
 
     /// <summary>按编号取一条记录；不存在时返回 null。主窗口用它把刚翻译出来的那条插到列表顶部。</summary>
-    public async Task<TranslationRecord?> GetAsync(long id, CancellationToken cancellationToken)
-    {
-        await using SqliteConnection connection = _database.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+    public Task<TranslationRecord?> GetAsync(long id, CancellationToken cancellationToken) =>
+        _database.RunAsync(() => GetAsyncCore(id, cancellationToken), cancellationToken);
 
-        await using SqliteCommand command = connection.CreateCommand();
+    private TranslationRecord? GetAsyncCore(long id, CancellationToken cancellationToken)
+    {
+        using SqliteConnection connection = _database.CreateConnection();
+        connection.Open();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
             SELECT id, cache_key, source_text, result_text, target_lang, mode_id,
                    model, is_word, starred, app_name, latency_ms, created_at,
@@ -101,33 +117,46 @@ public sealed class HistoryRepository
              WHERE id = $id;
             """;
         command.Parameters.AddWithValue("$id", id);
-        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-        return await reader.ReadAsync(cancellationToken) ? ReadRecord(reader) : null;
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read() ? ReadRecord(reader) : null;
     }
 
-    public async Task SetStarredAsync(long id, bool starred, CancellationToken cancellationToken)
-    {
-        await using SqliteConnection connection = _database.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+    public Task SetStarredAsync(long id, bool starred, CancellationToken cancellationToken) =>
+        _database.RunAsync(() => SetStarredAsyncCore(id, starred, cancellationToken), cancellationToken);
 
-        await using SqliteCommand command = connection.CreateCommand();
+    private void SetStarredAsyncCore(long id, bool starred, CancellationToken cancellationToken)
+    {
+        using SqliteConnection connection = _database.CreateConnection();
+        connection.Open();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "UPDATE translations SET starred = $starred WHERE id = $id;";
         command.Parameters.AddWithValue("$starred", starred ? 1 : 0);
         command.Parameters.AddWithValue("$id", id);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        command.ExecuteNonQuery();
     }
 
-    public async Task<IReadOnlyList<TranslationRecord>> QueryAsync(
+    public Task<IReadOnlyList<TranslationRecord>> QueryAsync(
+        string keyword,
+        bool starredOnly,
+        int offset,
+        int limit,
+        CancellationToken cancellationToken) =>
+        _database.RunAsync(() => QueryAsyncCore(keyword, starredOnly, offset, limit, cancellationToken), cancellationToken);
+
+    private IReadOnlyList<TranslationRecord> QueryAsyncCore(
         string keyword,
         bool starredOnly,
         int offset,
         int limit,
         CancellationToken cancellationToken)
     {
-        await using SqliteConnection connection = _database.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        using SqliteConnection connection = _database.CreateConnection();
+        connection.Open();
+        cancellationToken.ThrowIfCancellationRequested();
 
-        await using SqliteCommand command = connection.CreateCommand();
+        using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
             SELECT id, cache_key, source_text, result_text, target_lang, mode_id,
                    model, is_word, starred, app_name, latency_ms, created_at,
@@ -145,20 +174,25 @@ public sealed class HistoryRepository
         command.Parameters.AddWithValue("$offset", Math.Max(0, offset));
 
         List<TranslationRecord> records = [];
-        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
         {
+            cancellationToken.ThrowIfCancellationRequested();
             records.Add(ReadRecord(reader));
         }
 
         return records;
     }
 
-    public async Task<IReadOnlyList<TranslationRecord>> GetAllAsync(CancellationToken cancellationToken)
+    public Task<IReadOnlyList<TranslationRecord>> GetAllAsync(CancellationToken cancellationToken) =>
+        _database.RunAsync(() => GetAllAsyncCore(cancellationToken), cancellationToken);
+
+    private IReadOnlyList<TranslationRecord> GetAllAsyncCore(CancellationToken cancellationToken)
     {
-        await using SqliteConnection connection = _database.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-        await using SqliteCommand command = connection.CreateCommand();
+        using SqliteConnection connection = _database.CreateConnection();
+        connection.Open();
+        cancellationToken.ThrowIfCancellationRequested();
+        using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
             SELECT id, cache_key, source_text, result_text, target_lang, mode_id,
                    model, is_word, starred, app_name, latency_ms, created_at,
@@ -168,33 +202,42 @@ public sealed class HistoryRepository
             """;
 
         List<TranslationRecord> records = [];
-        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
         {
+            cancellationToken.ThrowIfCancellationRequested();
             records.Add(ReadRecord(reader));
         }
 
         return records;
     }
 
-    public async Task DeleteAsync(long id, CancellationToken cancellationToken)
+    public Task DeleteAsync(long id, CancellationToken cancellationToken) =>
+        _database.RunAsync(() => DeleteAsyncCore(id, cancellationToken), cancellationToken);
+
+    private void DeleteAsyncCore(long id, CancellationToken cancellationToken)
     {
-        await using SqliteConnection connection = _database.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-        await using SqliteCommand command = connection.CreateCommand();
+        using SqliteConnection connection = _database.CreateConnection();
+        connection.Open();
+        cancellationToken.ThrowIfCancellationRequested();
+        using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "DELETE FROM translations WHERE id = $id;";
         command.Parameters.AddWithValue("$id", id);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        command.ExecuteNonQuery();
     }
 
-    public async Task RunReadWriteDiagnosticAsync(CancellationToken cancellationToken)
+    public Task RunReadWriteDiagnosticAsync(CancellationToken cancellationToken) =>
+        _database.RunAsync(() => RunReadWriteDiagnosticAsyncCore(cancellationToken), cancellationToken);
+
+    private void RunReadWriteDiagnosticAsyncCore(CancellationToken cancellationToken)
     {
         string marker = $"diagnostic-{Guid.NewGuid():N}";
-        await using SqliteConnection connection = _database.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-        await using SqliteTransaction transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        using SqliteConnection connection = _database.CreateConnection();
+        connection.Open();
+        cancellationToken.ThrowIfCancellationRequested();
+        using SqliteTransaction transaction = connection.BeginTransaction();
 
-        await using (SqliteCommand insert = connection.CreateCommand())
+        using (SqliteCommand insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
             insert.CommandText = """
@@ -206,45 +249,49 @@ public sealed class HistoryRepository
                 """;
             insert.Parameters.AddWithValue("$marker", marker);
             insert.Parameters.AddWithValue("$created_at", DateTime.Now.ToString("O", CultureInfo.InvariantCulture));
-            await insert.ExecuteNonQueryAsync(cancellationToken);
+            insert.ExecuteNonQuery();
         }
 
-        await using (SqliteCommand read = connection.CreateCommand())
+        using (SqliteCommand read = connection.CreateCommand())
         {
             read.Transaction = transaction;
             read.CommandText = "SELECT result_text FROM translations WHERE cache_key = $marker;";
             read.Parameters.AddWithValue("$marker", marker);
-            object? value = await read.ExecuteScalarAsync(cancellationToken);
+            object? value = read.ExecuteScalar();
             if (!string.Equals(value as string, "诊断", StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("数据库写入后无法正确读回。");
             }
         }
 
-        await using (SqliteCommand delete = connection.CreateCommand())
+        using (SqliteCommand delete = connection.CreateCommand())
         {
             delete.Transaction = transaction;
             delete.CommandText = "DELETE FROM translations WHERE cache_key = $marker;";
             delete.Parameters.AddWithValue("$marker", marker);
-            await delete.ExecuteNonQueryAsync(cancellationToken);
+            delete.ExecuteNonQuery();
         }
 
-        await transaction.CommitAsync(cancellationToken);
+        transaction.Commit();
     }
 
     /// <summary>
     /// 统计记录条数。SPEC §7.4 规定清空操作前必须告诉用户会删多少、保留多少。
     /// </summary>
-    public async Task<(int NonStarred, int Starred)> CountAsync(CancellationToken cancellationToken)
+    public Task<(int NonStarred, int Starred)> CountAsync(CancellationToken cancellationToken) =>
+        _database.RunAsync(() => CountAsyncCore(cancellationToken), cancellationToken);
+
+    private (int NonStarred, int Starred) CountAsyncCore(CancellationToken cancellationToken)
     {
-        await using SqliteConnection connection = _database.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-        await using SqliteCommand command = connection.CreateCommand();
+        using SqliteConnection connection = _database.CreateConnection();
+        connection.Open();
+        cancellationToken.ThrowIfCancellationRequested();
+        using SqliteCommand command = connection.CreateCommand();
         command.CommandText =
             "SELECT SUM(CASE WHEN starred = 0 THEN 1 ELSE 0 END), "
             + "SUM(CASE WHEN starred = 1 THEN 1 ELSE 0 END) FROM translations;";
-        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
+        using SqliteDataReader reader = command.ExecuteReader();
+        if (!reader.Read())
         {
             return (0, 0);
         }
@@ -258,16 +305,19 @@ public sealed class HistoryRepository
     /// 只删除未收藏的记录。SPEC §7.4：星标收藏是用户攒的生词本，任何清理操作都不得删除。
     /// 刻意不提供批量删除收藏的入口，收藏只能在主窗口的记录卡片上逐条删除。
     /// </summary>
-    public async Task ClearNonStarredAsync(CancellationToken cancellationToken)
+    public Task ClearNonStarredAsync(CancellationToken cancellationToken) =>
+        _database.RunAsync(() => ClearNonStarredAsyncCore(cancellationToken), cancellationToken);
+
+    private void ClearNonStarredAsyncCore(CancellationToken cancellationToken)
     {
-        await ExecuteDeleteAsync("DELETE FROM translations WHERE starred = 0;", cancellationToken);
+        ExecuteDelete("DELETE FROM translations WHERE starred = 0;", cancellationToken);
 
         // SQLite 删记录只是把那几页标成"可复用"，原文译文的字节还躺在文件里，
         // 用工具打开 history.db 照样翻得出来。用户点「清空」就是要它没了，所以顺手压实一次。
         // 压实失败不影响"已删除"这个结果，只记日志。
         try
         {
-            await ExecuteDeleteAsync("VACUUM;", cancellationToken);
+            ExecuteDelete("VACUUM;", cancellationToken);
         }
         catch (SqliteException exception)
         {
@@ -282,13 +332,17 @@ public sealed class HistoryRepository
     /// 能命中的 key 是纯十六进制哈希；带 <c>#</c> 的都已经不会命中了
     /// （<c>#incomplete</c> 是被截断的译文，<c>#cleared</c> 是清过缓存的），不算在内。
     /// </remarks>
-    public async Task<int> CountCachedAsync(CancellationToken cancellationToken)
+    public Task<int> CountCachedAsync(CancellationToken cancellationToken) =>
+        _database.RunAsync(() => CountCachedAsyncCore(cancellationToken), cancellationToken);
+
+    private int CountCachedAsyncCore(CancellationToken cancellationToken)
     {
-        await using SqliteConnection connection = _database.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-        await using SqliteCommand command = connection.CreateCommand();
+        using SqliteConnection connection = _database.CreateConnection();
+        connection.Open();
+        cancellationToken.ThrowIfCancellationRequested();
+        using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM translations WHERE instr(cache_key, '#') = 0;";
-        object? value = await command.ExecuteScalarAsync(cancellationToken);
+        object? value = command.ExecuteScalar();
         return value is long count ? (int)count : 0;
     }
 
@@ -304,23 +358,28 @@ public sealed class HistoryRepository
     /// </para>
     /// </remarks>
     /// <returns>这次失效的记录条数。</returns>
-    public async Task<int> InvalidateCacheAsync(CancellationToken cancellationToken)
+    public Task<int> InvalidateCacheAsync(CancellationToken cancellationToken) =>
+        _database.RunAsync(() => InvalidateCacheAsyncCore(cancellationToken), cancellationToken);
+
+    private int InvalidateCacheAsyncCore(CancellationToken cancellationToken)
     {
-        await using SqliteConnection connection = _database.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-        await using SqliteCommand command = connection.CreateCommand();
+        using SqliteConnection connection = _database.CreateConnection();
+        connection.Open();
+        cancellationToken.ThrowIfCancellationRequested();
+        using SqliteCommand command = connection.CreateCommand();
         command.CommandText =
             "UPDATE translations SET cache_key = cache_key || '#cleared' WHERE instr(cache_key, '#') = 0;";
-        return await command.ExecuteNonQueryAsync(cancellationToken);
+        return command.ExecuteNonQuery();
     }
 
-    private async Task ExecuteDeleteAsync(string commandText, CancellationToken cancellationToken)
+    private void ExecuteDelete(string commandText, CancellationToken cancellationToken)
     {
-        await using SqliteConnection connection = _database.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-        await using SqliteCommand command = connection.CreateCommand();
+        using SqliteConnection connection = _database.CreateConnection();
+        connection.Open();
+        cancellationToken.ThrowIfCancellationRequested();
+        using SqliteCommand command = connection.CreateCommand();
         command.CommandText = commandText;
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        command.ExecuteNonQuery();
     }
 
     private static string EscapeLikePattern(string value) =>

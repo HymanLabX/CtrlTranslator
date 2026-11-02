@@ -121,6 +121,17 @@ public partial class MainWindow : Window
             return;
         }
 
+        // 后台读取期间，用户可能已经切换筛选，或分页已经把这条记录载入。
+        if (_searchKeyword.Length > 0 || StarredTabButton.IsChecked == true)
+        {
+            _historyDirty = true;
+            return;
+        }
+        if (_records.Any(record => record.Id == recordId))
+        {
+            return;
+        }
+
         _records.Insert(0, added);
         UpdateEmptyState(starredOnly: false);
     }
@@ -434,6 +445,7 @@ public partial class MainWindow : Window
             if (reset)
             {
                 _reloadPending = true;
+                _loadCancellation?.Cancel();
             }
 
             return;
@@ -461,9 +473,14 @@ public partial class MainWindow : Window
             bool starredOnly = StarredTabButton.IsChecked == true;
             IReadOnlyList<TranslationRecord> page = await _repository.QueryAsync(
                 _searchKeyword, starredOnly, _records.Count, PageSize, token);
+            token.ThrowIfCancellationRequested();
+            HashSet<long> existingIds = _records.Select(record => record.Id).ToHashSet();
             foreach (TranslationRecord record in page)
             {
-                _records.Add(record);
+                if (existingIds.Add(record.Id))
+                {
+                    _records.Add(record);
+                }
             }
             _hasMore = page.Count == PageSize;
             UpdateEmptyState(starredOnly);

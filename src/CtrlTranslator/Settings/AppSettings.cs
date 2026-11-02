@@ -251,24 +251,18 @@ public sealed class AppSettings
             }
         }
 
-        // 内置模式的提示词以代码为准：老配置里存的是旧版提示词，这里整体覆盖。
-        // 自定义模式（Id 不在内置清单里）不动。
-        if (PromptVersion < CurrentPromptVersion)
+        // 只升级确认没有手改的默认模板；划词和深度模板分别判断，保留用户自己的调整。
+        foreach (TranslationMode builtIn in builtIns)
         {
-            foreach (TranslationMode builtIn in builtIns)
+            TranslationMode? stored = Modes.FirstOrDefault(
+                mode => string.Equals(mode.Id, builtIn.Id, StringComparison.Ordinal));
+            if (stored is not null)
             {
-                TranslationMode? stored = Modes.FirstOrDefault(
-                    mode => string.Equals(mode.Id, builtIn.Id, StringComparison.Ordinal));
-                if (stored is not null)
-                {
-                    stored.SystemPromptTemplate = builtIn.SystemPromptTemplate;
-                    stored.DeepPromptTemplate = builtIn.DeepPromptTemplate;
-                    stored.IsBuiltIn = true;
-                }
+                BuiltInPromptUpgrade.Apply(stored, builtIn, PromptVersion < CurrentPromptVersion);
             }
-
-            PromptVersion = CurrentPromptVersion;
         }
+
+        PromptVersion = Math.Max(PromptVersion, CurrentPromptVersion);
 
         if (!Modes.Any(mode => string.Equals(mode.Id, CurrentModeId, StringComparison.Ordinal)))
         {

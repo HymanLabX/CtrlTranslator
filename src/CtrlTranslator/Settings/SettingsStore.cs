@@ -51,13 +51,16 @@ public sealed class SettingsStore
             // Normalize 会就地把过期的内置提示词刷成最新版、把超时钳到上限，所以必须在调用前
             // 记下是否需要改动，否则调用后再比较永远是"已最新"，改动就写不回磁盘。
             bool promptsOutdated = settings.PromptVersion < AppSettings.CurrentPromptVersion;
+            bool promptTrackingMissing = settings.Modes is null || settings.Modes.Any(mode =>
+                BuiltInModes.CreateDefaults().Any(item => item.Id == mode.Id)
+                && (mode.DefaultSystemPromptHash is null || mode.DefaultDeepPromptHash is null));
             bool timeoutsOutdated = HasOversizedTimeout(settings);
             settings.Normalize();
             if (promptsOutdated)
             {
                 Logger.Info(
                     "设置",
-                    $"内置模式提示词已升级到第 {AppSettings.CurrentPromptVersion} 版。");
+                    $"内置模式默认模板已检查至第 {AppSettings.CurrentPromptVersion} 版，用户修改已保留。");
             }
 
             if (timeoutsOutdated)
@@ -67,7 +70,7 @@ public sealed class SettingsStore
 
             DecryptApiKeys(settings);
 
-            if ((migrated || promptsOutdated || timeoutsOutdated)
+            if ((migrated || promptsOutdated || promptTrackingMissing || timeoutsOutdated)
                 && !TrySave(settings, out string? saveError))
             {
                 LastWarning = saveError;

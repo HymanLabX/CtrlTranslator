@@ -36,8 +36,7 @@ internal sealed record TranslationResult(
     string? ProfileId = null)
 {
     public bool IsTruncated =>
-        string.Equals(FinishReason, "length", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(FinishReason, "content_filter", StringComparison.OrdinalIgnoreCase);
+        TranslationCompletion.IsIncomplete(FinishReason);
 }
 
 /// <summary>
@@ -56,8 +55,7 @@ internal sealed record DeepTranslationOutcome(
     string? DirectConnectionProxy = null)
 {
     public bool IsTruncated =>
-        string.Equals(FinishReason, "length", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(FinishReason, "content_filter", StringComparison.OrdinalIgnoreCase);
+        TranslationCompletion.IsIncomplete(FinishReason);
 }
 
 /// <summary>一次划词请求的时间与产出预算。</summary>
@@ -568,6 +566,7 @@ internal sealed class TranslationService : IDisposable
         ApiProfile profile)
     {
         string material = string.Join('\u0001',
+            NormalizeServiceAddress(profile.BaseUrl),
             sourceText,
             prompt.SystemPrompt,
             prompt.UserContent,
@@ -578,6 +577,16 @@ internal sealed class TranslationService : IDisposable
             profile.ExtraRequestBody?.Trim() ?? string.Empty);
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(material));
         return Convert.ToHexStringLower(hash);
+    }
+
+    private static string NormalizeServiceAddress(string baseUrl)
+    {
+        string address = baseUrl.Trim().TrimEnd('/');
+        // 主机名不区分大小写，路径仍保留大小写；同名模型在不同接口上的结果必须隔离。
+        return Uri.TryCreate(address, UriKind.Absolute, out Uri? uri)
+            ? uri.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped).ToLowerInvariant()
+                + uri.AbsolutePath.TrimEnd('/') + uri.Query
+            : address;
     }
 
     private async Task<TranslationRecord?> TryReadCacheAsync(

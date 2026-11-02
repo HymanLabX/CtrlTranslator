@@ -53,7 +53,8 @@ public partial class App : System.Windows.Application
     private bool _loggerInitialized;
     private int _unhandledExceptionReported;
 
-    protected override void OnStartup(StartupEventArgs e)
+    // WPF 启动事件允许异步；建表与迁移在后台完成，避免启动时阻塞界面。
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
@@ -102,11 +103,16 @@ public partial class App : System.Windows.Application
             Database database = new();
             try
             {
-                database.Initialize();
+                await database.InitializeAsync(CancellationToken.None);
             }
             catch (Exception exception)
             {
                 Logger.Error("数据库", "初始化历史数据库失败，翻译功能将继续运行。", exception);
+            }
+
+            if (Dispatcher.HasShutdownStarted)
+            {
+                return;
             }
 
             _historyRepository = new HistoryRepository(database);

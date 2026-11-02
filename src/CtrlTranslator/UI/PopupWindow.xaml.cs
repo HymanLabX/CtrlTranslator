@@ -222,6 +222,14 @@ public partial class PopupWindow : Window
     /// </summary>
     private void ShowTruncationNotice(TranslationResult result)
     {
+        if (!string.Equals(result.FinishReason, "length", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(result.FinishReason, "content_filter", StringComparison.OrdinalIgnoreCase))
+        {
+            ShowNotice("译文可能不完整：服务商没有正常完成输出。可以重新翻译一次。",
+                ErrorAction.Retry, "重新翻译", isWarning: true);
+            return;
+        }
+
         string message = string.Equals(result.FinishReason, "content_filter", StringComparison.OrdinalIgnoreCase)
             ? "译文不完整：服务商的内容审核中途截停了输出。"
             : result.MaxTokens > 0

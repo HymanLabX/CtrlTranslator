@@ -638,9 +638,12 @@ internal sealed partial class DeepTranslationView : UserControl
         // 写到输出上限被截断时，最后一节（通常是搭配）会缺一截，必须说出来。
         if (outcome.IsTruncated)
         {
-            parts.Add(string.Equals(outcome.FinishReason, "content_filter", StringComparison.OrdinalIgnoreCase)
-                ? "服务商的内容审核中途截停了输出，结果不完整"
-                : "写到输出上限被截断了，结果不完整，可以把原文分短一点再翻");
+            parts.Add(outcome.FinishReason?.ToLowerInvariant() switch
+            {
+                "content_filter" => "服务商的内容审核中途截停了输出，结果不完整",
+                "length" => "写到输出上限被截断了，结果不完整，可以把原文分短一点再翻",
+                _ => "服务商没有正常完成输出，结果可能不完整，可以重新翻译一次"
+            });
         }
 
         // 模型没守格式时，用户至少该知道"例句那一节没出来"不是软件吞了。

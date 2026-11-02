@@ -92,6 +92,7 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
         long? promptTokens = null;
         long? completionTokens = null;
         string? finishReason = null;
+        bool sawDone = false;
         var resultBuilder = new StringBuilder();
 
         try
@@ -132,6 +133,7 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
                 {
                     if (payload == "[DONE]")
                     {
+                        sawDone = true;
                         break;
                     }
 
@@ -167,6 +169,12 @@ internal sealed class OpenAiCompatibleClient : ITranslationClient
                 throw firstTokenLatency < 0 && !sawReasoning && finishReason is null
                     ? new TranslationJsonException()
                     : new EmptyTranslationException();
+            }
+
+            // 有正文却没有任何正常结束信号：保留已收到的译文，但明确提示，不让半截结果进入缓存。
+            if (!sawDone && string.IsNullOrWhiteSpace(finishReason))
+            {
+                finishReason = "stream_interrupted";
             }
 
             if (finishReason is not null

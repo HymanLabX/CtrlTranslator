@@ -58,10 +58,17 @@ internal sealed record TranslationClientResult(
     string? FinishReason = null,
     string? DirectConnectionProxy = null)
 {
-    /// <summary>译文是否被截断（达到输出上限或被内容审核截停）。</summary>
+    /// <summary>译文是否未完整结束（截断、审核截停、流提前结束或未知结束原因）。</summary>
     public bool IsTruncated =>
-        string.Equals(FinishReason, "length", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(FinishReason, "content_filter", StringComparison.OrdinalIgnoreCase);
+        TranslationCompletion.IsIncomplete(FinishReason);
+}
+
+/// <summary>划词、深度翻译和缓存共用完成状态判断，未知结束原因也不能冒充完整译文。</summary>
+internal static class TranslationCompletion
+{
+    public static bool IsIncomplete(string? finishReason) =>
+        !string.IsNullOrWhiteSpace(finishReason)
+        && !string.Equals(finishReason, "stop", StringComparison.OrdinalIgnoreCase);
 }
 
 internal enum TranslationConfigurationError
